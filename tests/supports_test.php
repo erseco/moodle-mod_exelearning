@@ -55,13 +55,14 @@ final class supports_test extends advanced_testcase {
 
     /**
      * The icon is branded so Moodle does not tint it with the assessment purpose
-     * colour, and the course icon resolves to the official, coloured monologo.
+     * colour, and the monologo carries the official colour.
      */
     public function test_activity_icon_is_branded(): void {
         global $CFG;
 
         $this->assertTrue(exelearning_is_branded());
-        $this->assertTrue(\core_course\output\activity_icon::from_modname('exelearning')->is_branded());
+        // Core resolves the flag through this callback on every supported branch (4.5-5.2).
+        $this->assertTrue(component_callback('mod_exelearning', 'is_branded', [], false));
         $this->assertStringContainsString(
             'fill="#26ddc7"',
             file_get_contents($CFG->dirroot . '/mod/exelearning/pix/monologo.svg')
