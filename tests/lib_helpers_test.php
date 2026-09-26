@@ -32,7 +32,6 @@ require_once($CFG->dirroot . '/mod/exelearning/lib.php');
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  * @covers     ::exelearning_reset_userdata
  * @covers     ::exelearning_get_package_url
- * @covers     ::exelearning_grade_item_view_url
  * @covers     ::exelearning_grade_analysis_url
  * @covers     ::exelearning_embedded_editor_enabled
  * @covers     ::exelearning_require_embedded_editor_enabled
@@ -92,14 +91,14 @@ final class lib_helpers_test extends advanced_testcase {
     }
 
     /**
-     * exelearning_grade_item_view_url() deep-links per-iDevice items by objectid.
+     * \mod_exelearning\local\urls::grade_item_view_url() deep-links per-iDevice items by objectid.
      */
     public function test_grade_item_view_url_deeplinks_by_objectid(): void {
         global $DB;
         [, $instance, $cm] = $this->make();
 
         // Overall (0) links to the front page with no idevice parameter.
-        $overall = exelearning_grade_item_view_url($instance, $cm->id, 0);
+        $overall = \mod_exelearning\local\urls::grade_item_view_url($instance, $cm->id, 0);
         $this->assertStringContainsString('/mod/exelearning/view.php', $overall->out(false));
         $this->assertNull($overall->param('idevice'));
 
@@ -109,7 +108,7 @@ final class lib_helpers_test extends advanced_testcase {
             'itemnumber'    => 1,
             'deleted'       => 0,
         ]);
-        $view = exelearning_grade_item_view_url($instance, $cm->id, 1);
+        $view = \mod_exelearning\local\urls::grade_item_view_url($instance, $cm->id, 1);
         $this->assertSame($objectid, $view->param('idevice'));
     }
 

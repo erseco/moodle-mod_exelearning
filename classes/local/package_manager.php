@@ -117,6 +117,61 @@ final class package_manager {
     }
 
     /**
+     * Recovers content and grade items a programmatic upload left unprocessed.
+     *
+     * Uploads that bypass exelearning_add_instance() (e.g. the Moodle Playground
+     * `addModule`) store the ELPX without extracting it or scanning its grade items.
+     * extract_stored() wipes the target revision first, so this takes the package lock
+     * like {@see refresh_runtime()}: concurrent viewers and editor/form saves must not
+     * delete each other's extraction. A busy lock or a corrupt package leaves the page
+     * on its "no content" branch instead of throwing into the learner view.
+     *
+     * @param int $contextid Module context id.
+     * @param stdClass $instance Activity row; its revision is refreshed in place.
+     * @return \stored_file|null The servable index.html, or null when there is none.
+     */
+    public static function self_heal(int $contextid, stdClass $instance): ?\stored_file {
+        global $DB;
+
+        $fs = get_file_storage();
+        $entry = $fs->get_file($contextid, 'mod_exelearning', 'content', (int) $instance->revision, '/', 'index.html') ?: null;
+        // The gradesyncrev marker keeps content-only packages from being rescanned on
+        // every view: grade_sync stamps max(revision, 1) once a revision is scanned.
+        $needssync = (int) $instance->gradesyncrev < max((int) $instance->revision, 1);
+        if (($entry && !$needssync) || !self::get_stored_package($contextid)) {
+            return $entry;
+        }
+        $lock = self::get_package_lock((int) $instance->id);
+        if (!$lock) {
+            return $entry;
+        }
+        try {
+            // Another request may have healed or replaced the package while we waited.
+            $current = $DB->get_record('exelearning', ['id' => $instance->id], 'id, revision, gradesyncrev', MUST_EXIST);
+            $instance->revision = (int) $current->revision;
+            $entry = $fs->get_file($contextid, 'mod_exelearning', 'content', $instance->revision, '/', 'index.html') ?: null;
+            if (!$entry) {
+                try {
+                    self::extract_stored($contextid, $instance->revision);
+                    $entry = $fs->get_file($contextid, 'mod_exelearning', 'content', $instance->revision, '/', 'index.html')
+                        ?: null;
+                } catch (\moodle_exception $e) {
+                    if ($e->errorcode !== 'migrateextractfailed') {
+                        throw $e;
+                    }
+                    debugging('mod_exelearning: view self-heal could not extract the stored package.', DEBUG_DEVELOPER);
+                }
+            }
+            if ((int) $current->gradesyncrev < max($instance->revision, 1)) {
+                \exelearning_sync_grade_items((int) $instance->id, $contextid);
+            }
+            return $entry;
+        } finally {
+            $lock->release();
+        }
+    }
+
+    /**
      * Whether both extracted SCORM files match this plugin's bundled pair.
      *
      * @param int $contextid Module context id.
@@ -424,6 +479,65 @@ final class package_manager {
         $package = self::get_stored_package($contextid);
         if ($package instanceof \stored_file) {
             self::prune_package_revisions($contextid, (int) $package->get_itemid());
+        }
+    }
+
+    /**
+     * Stores a package exported by the embedded editor as the next revision and activates it.
+     *
+     * Core of editor/save.php, kept here so it is testable. The package is staged at
+     * `package/{revision + 1}/` and handed straight to store_and_activate_revision(), which
+     * is the only extraction: nothing touches the content area before the new revision
+     * validates, so a corrupt save leaves the live revision servable (issue 73). On
+     * failure the staged package is dropped and the exception rethrown.
+     *
+     * The upload is subject to the same site/course size limit as the form filepicker
+     * (SEC-006); users with moodle/course:ignorefilesizelimits bypass it, as in core.
+     *
+     * @param \context $context Module context.
+     * @param \stdClass $exelearning Instance row, freshly read under the package lock (mutated).
+     * @param string $pathname Local path of the uploaded package.
+     * @param string $filename Uploaded file name (already cleaned).
+     * @param \stdClass $user The saving user.
+     * @throws \moodle_exception maxbytesfile when the package exceeds the upload limit.
+     */
+    public static function save_editor_package(
+        \context $context,
+        \stdClass $exelearning,
+        string $pathname,
+        string $filename,
+        \stdClass $user
+    ): void {
+        global $CFG, $DB;
+        $coursebytes = (int) $DB->get_field('course', 'maxbytes', ['id' => $exelearning->course]);
+        $maxbytes = get_user_max_upload_file_size($context, $CFG->maxbytes, $coursebytes, 0, $user);
+        if ($maxbytes != USER_CAN_IGNORE_FILE_SIZE_LIMITS && $maxbytes > 0 && filesize($pathname) > $maxbytes) {
+            throw new \moodle_exception('maxbytesfile', 'error', '', (object) [
+                'file' => $filename,
+                'size' => display_size($maxbytes),
+            ]);
+        }
+        $newrevision = (int) $exelearning->revision + 1;
+        $newpackage = get_file_storage()->create_file_from_pathname([
+            'contextid' => $context->id,
+            'component' => 'mod_exelearning',
+            'filearea' => 'package',
+            'itemid' => $newrevision,
+            'filepath' => '/',
+            'filename' => $filename,
+            'userid' => $user->id,
+            'source' => $filename,
+            'author' => fullname($user),
+            'license' => 'unknown',
+        ], $pathname);
+
+        $exelearning->timemodified = time();
+        $exelearning->usermodified = $user->id;
+        try {
+            self::store_and_activate_revision($context->id, $exelearning, $newrevision);
+        } catch (\Throwable $e) {
+            $newpackage->delete();
+            throw $e;
         }
     }
 

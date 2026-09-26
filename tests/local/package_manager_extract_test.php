@@ -370,4 +370,102 @@ final class package_manager_extract_test extends advanced_testcase {
         }
         $this->assertSame([2 => true], $itemids);
     }
+
+    /**
+     * An editor save of a corrupt package must leave the live revision's content intact.
+     *
+     * Regression: editor/save.php used to run a legacy extraction that wiped EVERY content
+     * revision (delete_area_files() without itemid) before the new package was validated,
+     * so a corrupt save left the activity with no servable content (issue 73).
+     */
+    public function test_save_editor_package_corrupt_keeps_live_content(): void {
+        global $DB, $USER;
+        $this->resetAfterTest();
+        $this->setAdminUser();
+        $course = $this->getDataGenerator()->create_course();
+        /** @var \mod_exelearning_generator $generator */
+        $generator = $this->getDataGenerator()->get_plugin_generator('mod_exelearning');
+        $instance = $generator->create_instance(['course' => $course->id]);
+        $context = \context_module::instance($instance->cmid);
+        $fs = get_file_storage();
+        $before = count($fs->get_area_files($context->id, 'mod_exelearning', 'content', 1, 'id', false));
+        $this->assertGreaterThan(0, $before);
+
+        $blob = make_request_directory() . '/broken.elpx';
+        file_put_contents($blob, 'this is not a real zip archive');
+        $exelearning = $DB->get_record('exelearning', ['id' => $instance->id], '*', MUST_EXIST);
+        try {
+            package_manager::save_editor_package($context, $exelearning, $blob, 'broken.elpx', $USER);
+            $this->fail('A corrupt editor save must throw');
+        } catch (\moodle_exception $e) {
+            $this->assertSame('migrateextractfailed', $e->errorcode);
+        }
+        $this->assertDebuggingCalled();
+
+        $this->assertSame(1, (int) $DB->get_field('exelearning', 'revision', ['id' => $instance->id]));
+        $this->assertCount($before, $fs->get_area_files($context->id, 'mod_exelearning', 'content', 1, 'id', false));
+        $this->assertEmpty($fs->get_area_files($context->id, 'mod_exelearning', 'package', 2, 'id', false));
+    }
+
+    /**
+     * A valid editor save activates the next revision and prunes the previous one.
+     */
+    public function test_save_editor_package_valid_activates_next_revision(): void {
+        global $CFG, $DB, $USER;
+        $this->resetAfterTest();
+        $this->setAdminUser();
+        $course = $this->getDataGenerator()->create_course();
+        /** @var \mod_exelearning_generator $generator */
+        $generator = $this->getDataGenerator()->get_plugin_generator('mod_exelearning');
+        $instance = $generator->create_instance(['course' => $course->id]);
+        $context = \context_module::instance($instance->cmid);
+        $fs = get_file_storage();
+
+        $exelearning = $DB->get_record('exelearning', ['id' => $instance->id], '*', MUST_EXIST);
+        package_manager::save_editor_package(
+            $context,
+            $exelearning,
+            $CFG->dirroot . '/mod/exelearning/research/fixtures/elpx/actividad-evaluable.elpx',
+            'valid.elpx',
+            $USER
+        );
+
+        $this->assertSame(2, (int) $DB->get_field('exelearning', 'revision', ['id' => $instance->id]));
+        $this->assertNotFalse($fs->get_file($context->id, 'mod_exelearning', 'content', 2, '/', 'index.html'));
+        $this->assertEmpty($fs->get_area_files($context->id, 'mod_exelearning', 'content', 1, 'id', false));
+        $this->assertNotFalse($fs->get_file($context->id, 'mod_exelearning', 'package', 2, '/', 'valid.elpx'));
+    }
+
+    /**
+     * An editor save larger than the course upload limit is rejected before staging (SEC-006).
+     */
+    public function test_save_editor_package_over_course_limit_is_rejected(): void {
+        global $CFG, $DB;
+        $this->resetAfterTest();
+        $course = $this->getDataGenerator()->create_course(['maxbytes' => 1024]);
+        /** @var \mod_exelearning_generator $generator */
+        $generator = $this->getDataGenerator()->get_plugin_generator('mod_exelearning');
+        $instance = $generator->create_instance(['course' => $course->id]);
+        $context = \context_module::instance($instance->cmid);
+        // Editing teachers lack moodle/course:ignorefilesizelimits, so the limit applies.
+        $teacher = $this->getDataGenerator()->create_and_enrol($course, 'editingteacher');
+        $this->setUser($teacher);
+
+        $exelearning = $DB->get_record('exelearning', ['id' => $instance->id], '*', MUST_EXIST);
+        try {
+            package_manager::save_editor_package(
+                $context,
+                $exelearning,
+                $CFG->dirroot . '/mod/exelearning/research/fixtures/elpx/actividad-evaluable.elpx',
+                'big.elpx',
+                $teacher
+            );
+            $this->fail('An oversized editor save must throw');
+        } catch (\moodle_exception $e) {
+            $this->assertSame('maxbytesfile', $e->errorcode);
+        }
+
+        $this->assertSame(1, (int) $DB->get_field('exelearning', 'revision', ['id' => $instance->id]));
+        $this->assertEmpty(get_file_storage()->get_area_files($context->id, 'mod_exelearning', 'package', 2, 'id', false));
+    }
 }

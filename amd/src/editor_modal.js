@@ -18,8 +18,9 @@
  *
  * Opens the editor (served by editor/index.php) in a full-window overlay iframe
  * and drives the postMessage protocol with it: EXELEARNING_READY handshake,
- * OPEN_FILE for the current .elpx, DOCUMENT_CHANGED to track unsaved work, and
- * EXPORT_FILE to get the package back before POSTing it to editor/save.php.
+ * DOCUMENT_CHANGED to track unsaved work, and EXPORT_FILE to get the package
+ * back before POSTing it to editor/save.php. The editor loads the current .elpx
+ * itself from `initialProjectUrl` (editor/index.php), so no OPEN_FILE is sent.
  *
  * @module      mod_exelearning/editor_modal
  * @copyright   2025 eXeLearning
@@ -34,18 +35,13 @@ let iframe = null;
 let saveBtn = null;
 let loadingModal = null;
 let editorOrigin = '*';
-let openRequestSent = false;
-let openRequestId = null;
 let exportRequestId = null;
 let isSaving = false;
 let hasUnsavedChanges = false;
 let session = null;
 let requestCounter = 0;
-let openAttemptCount = 0;
-let openResponseTimer = null;
+let errorBox = null;
 
-const MAX_OPEN_ATTEMPTS = 3;
-const OPEN_RESPONSE_TIMEOUT_MS = 3000;
 const FIXED_EXPORT_FORMAT = 'elpx';
 
 /**
@@ -276,51 +272,6 @@ const postToEditor = (message, transfer) => {
 };
 
 /**
- * Clear the pending OPEN_FILE response timeout.
- *
- * @returns {void}
- */
-const clearOpenResponseTimer = () => {
-    if (openResponseTimer) {
-        clearTimeout(openResponseTimer);
-        openResponseTimer = null;
-    }
-};
-
-/**
- * Schedule a retry of the initial package open, with backoff.
- *
- * @returns {void}
- */
-const scheduleOpenRetry = () => {
-    if (openAttemptCount >= MAX_OPEN_ATTEMPTS) {
-        return;
-    }
-
-    setTimeout(() => {
-        openInitialPackage();
-    }, 300 * openAttemptCount);
-};
-
-/**
- * Arm a timeout that retries the open request if no response arrives.
- *
- * @returns {void}
- */
-const armOpenResponseTimer = () => {
-    clearOpenResponseTimer();
-    openResponseTimer = setTimeout(() => {
-        if (!openRequestSent) {
-            return;
-        }
-
-        Log.error('[editor_modal] OPEN_FILE timeout waiting for response');
-        openRequestSent = false;
-        scheduleOpenRetry();
-    }, OPEN_RESPONSE_TIMEOUT_MS);
-};
-
-/**
  * Toggle the saving state, updating the button and loading modal.
  *
  * @param {boolean} saving Whether a save is in progress.
@@ -338,48 +289,6 @@ const setSavingState = async(saving) => {
     } else {
         await setSaveLabel('savetomoodle', 'Save to Moodle');
         hideLoadingModal();
-    }
-};
-
-/**
- * Fetch the current package and send it to the editor to open.
- *
- * @returns {Promise<void>}
- */
-const openInitialPackage = async() => {
-    if (session?.skipOpenFileOnInit) {
-        return;
-    }
-    if (openRequestSent || !session?.packageUrl) {
-        return;
-    }
-
-    openRequestSent = true;
-    openAttemptCount += 1;
-
-    try {
-        const response = await fetch(session.packageUrl, {credentials: 'include'});
-        if (!response.ok) {
-            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-        }
-
-        const bytes = await response.arrayBuffer();
-        openRequestId = nextRequestId('open');
-
-        postToEditor({
-            type: 'OPEN_FILE',
-            requestId: openRequestId,
-            data: {
-                bytes,
-                filename: 'package.elpx',
-            },
-        });
-
-        armOpenResponseTimer();
-    } catch (error) {
-        Log.error('[editor_modal] Failed to open package:', error);
-        openRequestSent = false;
-        scheduleOpenRetry();
     }
 };
 
@@ -411,9 +320,16 @@ const uploadExportedFile = async(payload) => {
         credentials: 'include',
     });
 
-    const result = await response.json();
+    // A non-JSON body (e.g. a web server 413 page when the package exceeds
+    // post_max_size) is a failure too, not an unreported SyntaxError.
+    let result = null;
+    try {
+        result = await response.json();
+    } catch {
+        result = null;
+    }
     if (!response.ok || !result?.success) {
-        throw new Error(result?.error || `Save failed (${response.status})`);
+        throw new Error(result?.error || `HTTP ${response.status}`);
     }
 
     const updatedPackageUrl = updatePackageUrlRevision(session.packageUrl, result.revision);
@@ -433,6 +349,44 @@ const uploadExportedFile = async(payload) => {
 };
 
 /**
+ * Show (or clear, with an empty detail) a save failure in the overlay header.
+ *
+ * Rendered inside the overlay because it sits above Moodle's page notifications
+ * and modals (z-index 9999), which would otherwise be hidden behind it.
+ *
+ * @param {string} detail The error detail, or '' to clear the message.
+ * @returns {Promise<void>}
+ */
+const showSaveError = async(detail) => {
+    if (!errorBox) {
+        return;
+    }
+    if (!detail) {
+        errorBox.hidden = true;
+        errorBox.textContent = '';
+        return;
+    }
+    try {
+        errorBox.textContent = await getString('editorsavefailed', 'mod_exelearning', detail);
+    } catch {
+        errorBox.textContent = detail;
+    }
+    errorBox.hidden = false;
+};
+
+/**
+ * Report a failed save to the teacher and re-enable the save button.
+ *
+ * @param {*} error The error or editor-supplied error detail.
+ * @returns {Promise<void>}
+ */
+const handleSaveFailure = async(error) => {
+    Log.error('[editor_modal] Save failed:', error);
+    await setSavingState(false);
+    await showSaveError(String(error?.message || error || 'Error'));
+};
+
+/**
  * Request the editor to export the current document for saving.
  *
  * @returns {Promise<void>}
@@ -442,6 +396,7 @@ const requestExport = async() => {
         return;
     }
 
+    await showSaveError('');
     await setSavingState(true);
     exportRequestId = nextRequestId('export');
 
@@ -458,8 +413,8 @@ const requestExport = async() => {
 /**
  * Check that a postMessage event really comes from the embedded editor frame.
  *
- * The legacy eXeWeb bridge is kept for older static editor builds, but it must
- * enforce the same source/origin boundary as the modern bridge (RIE-010).
+ * Both the editor protocol and the `exeweb-editor` messages of the injected
+ * moodle_exe_bridge.js must enforce this source/origin boundary (RIE-010).
  *
  * @param {MessageEvent} event The incoming message event.
  * @returns {boolean} Whether the event belongs to the active editor iframe.
@@ -500,7 +455,6 @@ const handleBridgeMessage = async(event) => {
                     },
                 },
             });
-            openInitialPackage();
             break;
 
         case 'DOCUMENT_LOADED':
@@ -513,87 +467,30 @@ const handleBridgeMessage = async(event) => {
             hasUnsavedChanges = true;
             break;
 
-        case 'OPEN_FILE_SUCCESS':
-            if (data.requestId === openRequestId && saveBtn && !isSaving) {
-                saveBtn.disabled = false;
-                openRequestSent = false;
-                openAttemptCount = 0;
-                clearOpenResponseTimer();
-            }
-            break;
-
-        case 'OPEN_FILE_ERROR':
-            if (data.requestId === openRequestId) {
-                Log.error('[editor_modal] OPEN_FILE_ERROR:', data.error);
-                openRequestSent = false;
-                clearOpenResponseTimer();
-                scheduleOpenRetry();
-            }
-            break;
-
         case 'EXPORT_FILE':
             if (data.requestId === exportRequestId) {
                 try {
                     await uploadExportedFile(data);
                 } catch (error) {
-                    Log.error('[editor_modal] Upload failed:', error);
-                    await setSavingState(false);
+                    await handleSaveFailure(error);
                 }
             }
             break;
 
         case 'REQUEST_EXPORT_ERROR':
             if (data.requestId === exportRequestId) {
-                Log.error('[editor_modal] REQUEST_EXPORT_ERROR:', data.error);
-                await setSavingState(false);
+                await handleSaveFailure(data.error);
             }
             break;
 
         default:
+            // Ctrl/Cmd+S inside the editor: moodle_exe_bridge.js forwards it as
+            // `request-save`; it is the only message of that bridge still acted on.
+            if (data.source === 'exeweb-editor' && data.type === 'request-save') {
+                await requestExport();
+            }
             break;
     }
-};
-
-/**
- * Handle legacy bridge messages from older editor builds.
- *
- * @param {MessageEvent} event The incoming message event.
- * @returns {Promise<void>}
- */
-const handleLegacyBridgeMessage = async(event) => {
-    if (!isEditorBridgeMessage(event)) {
-        return;
-    }
-
-    const data = event.data;
-    if (!data || data.source !== 'exeweb-editor') {
-        return;
-    }
-
-    if (data.type === 'editor-ready' && data.data?.packageUrl) {
-        const incomingUrl = data.data.packageUrl;
-        if (incomingUrl !== session?.packageUrl) {
-            session.packageUrl = incomingUrl;
-            openRequestSent = false;
-            openAttemptCount = 0;
-        }
-        openInitialPackage();
-    }
-
-    if (data.type === 'request-save') {
-        await requestExport();
-    }
-};
-
-/**
- * Dispatch an incoming window message to both bridge handlers.
- *
- * @param {MessageEvent} event The incoming message event.
- * @returns {Promise<void>}
- */
-const handleMessage = async(event) => {
-    await handleBridgeMessage(event);
-    await handleLegacyBridgeMessage(event);
 };
 
 /**
@@ -631,17 +528,14 @@ export const close = async(skipConfirm) => {
     overlay = null;
     iframe = null;
     saveBtn = null;
+    errorBox = null;
     session = null;
-    openRequestSent = false;
-    openRequestId = null;
     exportRequestId = null;
     isSaving = false;
     hasUnsavedChanges = false;
-    openAttemptCount = 0;
-    clearOpenResponseTimer();
 
     document.body.style.overflow = '';
-    window.removeEventListener('message', handleMessage);
+    window.removeEventListener('message', handleBridgeMessage);
     document.removeEventListener('keydown', handleKeydown);
 
     if (wasShowingLoader) {
@@ -674,12 +568,10 @@ export const open = async(cmid, editorUrl, activityName, packageUrl, saveUrl, se
     }
 
     editorOrigin = getOrigin(editorUrl);
-    openAttemptCount = 0;
     session = {
         cmid,
         editorUrl,
         packageUrl: packageUrl || '',
-        skipOpenFileOnInit: !!packageUrl,
         saveUrl,
         sesskey,
     };
@@ -695,6 +587,12 @@ export const open = async(cmid, editorUrl, activityName, packageUrl, saveUrl, se
     title.className = 'exeweb-editor-title';
     title.textContent = activityName || '';
     header.appendChild(title);
+
+    errorBox = document.createElement('div');
+    errorBox.className = 'alert alert-danger mb-0 mx-2 py-1 px-2';
+    errorBox.setAttribute('role', 'alert');
+    errorBox.hidden = true;
+    header.appendChild(errorBox);
 
     const buttonGroup = document.createElement('div');
     buttonGroup.className = 'exeweb-editor-buttons';
@@ -726,17 +624,12 @@ export const open = async(cmid, editorUrl, activityName, packageUrl, saveUrl, se
     iframe.src = editorUrl;
     iframe.setAttribute('allow', 'fullscreen');
     iframe.setAttribute('frameborder', '0');
-    iframe.addEventListener('load', () => {
-        if (!openRequestSent && session?.packageUrl) {
-            openInitialPackage();
-        }
-    });
     overlay.appendChild(iframe);
 
     document.body.appendChild(overlay);
     document.body.style.overflow = 'hidden';
 
-    window.addEventListener('message', handleMessage);
+    window.addEventListener('message', handleBridgeMessage);
     document.addEventListener('keydown', handleKeydown);
 };
 

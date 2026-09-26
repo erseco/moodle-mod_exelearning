@@ -182,23 +182,7 @@ final class package_runtime_test extends advanced_testcase {
         $revision = (int) $instance->revision;
         $fs = get_file_storage();
         $oldhash = $fs->get_file($contextid, 'mod_exelearning', 'content', $revision, '/', 'index.html')->get_contenthash();
-        $source = package_manager::get_stored_package($contextid);
-        $record = [
-            'contextid' => $contextid,
-            'component' => 'mod_exelearning',
-            'filearea' => 'package',
-            'itemid' => $source->get_itemid(),
-            'filepath' => '/',
-            'filename' => $source->get_filename(),
-        ];
-        $source->delete();
-        $stage = make_request_directory();
-        file_put_contents($stage . '/content.xml', '<ode/>');
-        get_file_packer('application/zip')->archive_to_pathname(
-            ['content.xml' => $stage . '/content.xml'],
-            $stage . '/broken.elpx'
-        );
-        $fs->create_file_from_pathname($record, $stage . '/broken.elpx');
+        $this->store_broken_package($contextid);
 
         package_manager::refresh_runtime($contextid, $instance);
 
@@ -223,5 +207,88 @@ final class package_runtime_test extends advanced_testcase {
         $lock = package_manager::get_package_lock((int) $instance->id);
         $this->assertNotNull($lock, 'The failed form save must release its lock');
         $lock->release();
+    }
+
+    /**
+     * Replaces the stored ELPX with an archive that has content.xml but no index.html.
+     *
+     * @param int $contextid Module context id.
+     */
+    private function store_broken_package(int $contextid): void {
+        $fs = get_file_storage();
+        $source = package_manager::get_stored_package($contextid);
+        $record = [
+            'contextid' => $contextid,
+            'component' => 'mod_exelearning',
+            'filearea' => 'package',
+            'itemid' => $source->get_itemid(),
+            'filepath' => '/',
+            'filename' => $source->get_filename(),
+        ];
+        $source->delete();
+        $stage = make_request_directory();
+        file_put_contents($stage . '/content.xml', '<ode/>');
+        get_file_packer('application/zip')->archive_to_pathname(
+            ['content.xml' => $stage . '/content.xml'],
+            $stage . '/broken.elpx'
+        );
+        $fs->create_file_from_pathname($record, $stage . '/broken.elpx');
+    }
+
+    /**
+     * A programmatic upload with no extracted content is extracted and scanned on view.
+     */
+    public function test_self_heal_extracts_missing_content(): void {
+        global $DB;
+        [$instance, $contextid] = $this->create_activity(false);
+        $revision = (int) $instance->revision;
+        get_file_storage()->delete_area_files($contextid, 'mod_exelearning', 'content');
+        $DB->set_field('exelearning', 'gradesyncrev', 0, ['id' => $instance->id]);
+        $instance->gradesyncrev = 0;
+
+        $entry = package_manager::self_heal($contextid, $instance);
+
+        $this->assertInstanceOf(\stored_file::class, $entry);
+        $this->assertSame($revision, (int) $entry->get_itemid());
+        $this->assertSame('index.html', $entry->get_filename());
+        $this->assertSame(max($revision, 1), (int) $DB->get_field('exelearning', 'gradesyncrev', ['id' => $instance->id]));
+    }
+
+    /**
+     * A corrupt stored package returns null for the "no content" branch instead of throwing.
+     */
+    public function test_self_heal_corrupt_package_returns_null(): void {
+        global $CFG;
+        [$instance, $contextid] = $this->create_activity(false);
+        $CFG->lock_factory = '\\core\\lock\\file_lock_factory';
+        get_file_storage()->delete_area_files($contextid, 'mod_exelearning', 'content');
+        $this->store_broken_package($contextid);
+
+        $this->assertNull(package_manager::self_heal($contextid, $instance));
+        $this->assertDebuggingCalled();
+        $this->assertEmpty(get_file_storage()->get_area_files($contextid, 'mod_exelearning', 'content', false, 'id', false));
+        $lock = package_manager::get_package_lock((int) $instance->id);
+        $this->assertNotNull($lock, 'The failed self-heal must release its lock');
+        $lock->release();
+    }
+
+    /**
+     * A viewer never extracts while a package writer holds the lock.
+     */
+    public function test_self_heal_skips_extraction_while_lock_is_held(): void {
+        global $CFG;
+        [$instance, $contextid] = $this->create_activity(false);
+        // File locks are not reentrant, unlike some database-specific backends.
+        $CFG->lock_factory = '\\core\\lock\\file_lock_factory';
+        get_file_storage()->delete_area_files($contextid, 'mod_exelearning', 'content');
+        $lock = package_manager::get_package_lock((int) $instance->id);
+        $this->assertNotNull($lock);
+        try {
+            $this->assertNull(package_manager::self_heal($contextid, $instance));
+            $this->assertEmpty(get_file_storage()->get_area_files($contextid, 'mod_exelearning', 'content', false, 'id', false));
+        } finally {
+            $lock->release();
+        }
+        $this->assertNotNull(package_manager::self_heal($contextid, $instance));
     }
 }
