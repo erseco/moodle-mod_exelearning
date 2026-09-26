@@ -436,11 +436,15 @@ final class package_manager {
      * validates, so a corrupt save leaves the live revision servable (issue 73). On
      * failure the staged package is dropped and the exception rethrown.
      *
+     * The upload is subject to the same site/course size limit as the form filepicker
+     * (SEC-006); users with moodle/course:ignorefilesizelimits bypass it, as in core.
+     *
      * @param \context $context Module context.
      * @param \stdClass $exelearning Instance row, freshly read under the package lock (mutated).
      * @param string $pathname Local path of the uploaded package.
      * @param string $filename Uploaded file name (already cleaned).
      * @param \stdClass $user The saving user.
+     * @throws \moodle_exception maxbytesfile when the package exceeds the upload limit.
      */
     public static function save_editor_package(
         \context $context,
@@ -449,6 +453,15 @@ final class package_manager {
         string $filename,
         \stdClass $user
     ): void {
+        global $CFG, $DB;
+        $coursebytes = (int) $DB->get_field('course', 'maxbytes', ['id' => $exelearning->course]);
+        $maxbytes = get_user_max_upload_file_size($context, $CFG->maxbytes, $coursebytes, 0, $user);
+        if ($maxbytes != USER_CAN_IGNORE_FILE_SIZE_LIMITS && $maxbytes > 0 && filesize($pathname) > $maxbytes) {
+            throw new \moodle_exception('maxbytesfile', 'error', '', (object) [
+                'file' => $filename,
+                'size' => display_size($maxbytes),
+            ]);
+        }
         $newrevision = (int) $exelearning->revision + 1;
         $newpackage = get_file_storage()->create_file_from_pathname([
             'contextid' => $context->id,

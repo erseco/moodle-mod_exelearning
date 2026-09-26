@@ -435,4 +435,37 @@ final class package_manager_extract_test extends advanced_testcase {
         $this->assertEmpty($fs->get_area_files($context->id, 'mod_exelearning', 'content', 1, 'id', false));
         $this->assertNotFalse($fs->get_file($context->id, 'mod_exelearning', 'package', 2, '/', 'valid.elpx'));
     }
+
+    /**
+     * An editor save larger than the course upload limit is rejected before staging (SEC-006).
+     */
+    public function test_save_editor_package_over_course_limit_is_rejected(): void {
+        global $CFG, $DB;
+        $this->resetAfterTest();
+        $course = $this->getDataGenerator()->create_course(['maxbytes' => 1024]);
+        /** @var \mod_exelearning_generator $generator */
+        $generator = $this->getDataGenerator()->get_plugin_generator('mod_exelearning');
+        $instance = $generator->create_instance(['course' => $course->id]);
+        $context = \context_module::instance($instance->cmid);
+        // Editing teachers lack moodle/course:ignorefilesizelimits, so the limit applies.
+        $teacher = $this->getDataGenerator()->create_and_enrol($course, 'editingteacher');
+        $this->setUser($teacher);
+
+        $exelearning = $DB->get_record('exelearning', ['id' => $instance->id], '*', MUST_EXIST);
+        try {
+            package_manager::save_editor_package(
+                $context,
+                $exelearning,
+                $CFG->dirroot . '/mod/exelearning/research/fixtures/elpx/actividad-evaluable.elpx',
+                'big.elpx',
+                $teacher
+            );
+            $this->fail('An oversized editor save must throw');
+        } catch (\moodle_exception $e) {
+            $this->assertSame('maxbytesfile', $e->errorcode);
+        }
+
+        $this->assertSame(1, (int) $DB->get_field('exelearning', 'revision', ['id' => $instance->id]));
+        $this->assertEmpty(get_file_storage()->get_area_files($context->id, 'mod_exelearning', 'package', 2, 'id', false));
+    }
 }
