@@ -26,6 +26,6 @@ A valid archive is a v4 ZIP with root `content.xml`, whether named `.elpx` or `.
   never expose dataroot paths. Consult the SCORM contract before changing injection
   or sandbox behavior.
 
-Select tests from `package_test.php`, `package_legacy_test.php`, `zip_utils_test.php`,
+Select tests from `package_test.php`, `zip_utils_test.php`,
 `lib_extract_test.php`, `local/package_manager*_test.php`, plus grade regressions
 when detection/sync changes. Include failed replacement preserving previous state.

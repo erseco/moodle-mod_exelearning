@@ -428,6 +428,52 @@ final class package_manager {
     }
 
     /**
+     * Stores a package exported by the embedded editor as the next revision and activates it.
+     *
+     * Core of editor/save.php, kept here so it is testable. The package is staged at
+     * `package/{revision + 1}/` and handed straight to store_and_activate_revision(), which
+     * is the only extraction: nothing touches the content area before the new revision
+     * validates, so a corrupt save leaves the live revision servable (issue 73). On
+     * failure the staged package is dropped and the exception rethrown.
+     *
+     * @param \context $context Module context.
+     * @param \stdClass $exelearning Instance row, freshly read under the package lock (mutated).
+     * @param string $pathname Local path of the uploaded package.
+     * @param string $filename Uploaded file name (already cleaned).
+     * @param \stdClass $user The saving user.
+     */
+    public static function save_editor_package(
+        \context $context,
+        \stdClass $exelearning,
+        string $pathname,
+        string $filename,
+        \stdClass $user
+    ): void {
+        $newrevision = (int) $exelearning->revision + 1;
+        $newpackage = get_file_storage()->create_file_from_pathname([
+            'contextid' => $context->id,
+            'component' => 'mod_exelearning',
+            'filearea' => 'package',
+            'itemid' => $newrevision,
+            'filepath' => '/',
+            'filename' => $filename,
+            'userid' => $user->id,
+            'source' => $filename,
+            'author' => fullname($user),
+            'license' => 'unknown',
+        ], $pathname);
+
+        $exelearning->timemodified = time();
+        $exelearning->usermodified = $user->id;
+        try {
+            self::store_and_activate_revision($context->id, $exelearning, $newrevision);
+        } catch (\Throwable $e) {
+            $newpackage->delete();
+            throw $e;
+        }
+    }
+
+    /**
      * Deletes every 'content' revision except the one to keep (issue 73).
      *
      * Called by the orchestrators AFTER the DB revision pointer has advanced, so the kept

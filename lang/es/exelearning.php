@@ -39,7 +39,6 @@ $string['attemptsmanagementheading'] = 'Gestión de intentos';
 $string['attemptsofmax'] = '~Intentos: {$a->used} de {$a->max}';
 $string['attemptsreport'] = '~Informe de intentos';
 $string['attemptsused'] = '~Intentos utilizados: {$a}';
-$string['badexelearningpackage'] = '~El archivo subido no es un paquete eXeLearning válido.';
 $string['completiondetail:status'] = '~Alcanzar el estado: {$a}';
 $string['completionstatus_any'] = '~Aprobado o completado';
 $string['completionstatus_completed'] = 'Finalizado';
