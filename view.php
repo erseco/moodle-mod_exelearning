@@ -75,49 +75,11 @@ if ($showeditorbutton) {
     $PAGE->requires->js_call_amd('mod_exelearning/editor_modal', 'init', []);
 }
 
-$fs = get_file_storage();
 \mod_exelearning\local\package_manager::refresh_runtime($context->id, $exelearning);
-$mainfile = $fs->get_file(
-    $context->id,
-    'mod_exelearning',
-    'content',
-    (int) $exelearning->revision,
-    '/',
-    'index.html'
-);
-
-// Self-heal for programmatic uploads (e.g. the Moodle Playground `addModule`):
-// if the ELPX is in the 'package' filearea but the content was not extracted or
-// the grade items were not detected (because that path bypassed
-// exelearning_add_instance), recover here. Idempotent: only acts when something
-// is missing, so it does not penalise the normal view.
-$haspackage = (exelearning_get_stored_package($context->id) !== null);
-if ($haspackage) {
-    if (!$mainfile) {
-        exelearning_extract_stored_package($context->id, (int) $exelearning->revision);
-        $mainfile = $fs->get_file(
-            $context->id,
-            'mod_exelearning',
-            'content',
-            (int) $exelearning->revision,
-            '/',
-            'index.html'
-        );
-    }
-    // Self-heal grade-item detection, but only when this package revision has
-    // not been scanned yet (gradesyncrev marker). This used to fire whenever the
-    // activity had no gradable grade item, which for a content-only package
-    // (0 gradable iDevices) is PERMANENTLY true and re-extracted + re-parsed the
-    // entire ELPX on every single view — a self-inflicted DoS on the most common
-    // package type. exelearning_sync_grade_items() stamps max(revision, 1) once
-    // it has scanned, so each revision is scanned at most once;
-    // exelearning_update_instance() bumps revision to re-arm a scan when the
-    // content changes.
-    $synctarget = max((int) $exelearning->revision, 1);
-    if ((int) $exelearning->gradesyncrev < $synctarget) {
-        exelearning_sync_grade_items($exelearning->id, $context->id);
-    }
-}
+// Self-heal for programmatic uploads (e.g. the Moodle Playground `addModule`) that
+// stored the ELPX without extracting it or scanning its grade items. It only acts
+// when something is missing and runs under the package lock; null means no content.
+$mainfile = \mod_exelearning\local\package_manager::self_heal($context->id, $exelearning);
 
 echo $OUTPUT->header();
 echo $OUTPUT->heading(format_string($exelearning->name));

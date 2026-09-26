@@ -117,6 +117,61 @@ final class package_manager {
     }
 
     /**
+     * Recovers content and grade items a programmatic upload left unprocessed.
+     *
+     * Uploads that bypass exelearning_add_instance() (e.g. the Moodle Playground
+     * `addModule`) store the ELPX without extracting it or scanning its grade items.
+     * extract_stored() wipes the target revision first, so this takes the package lock
+     * like {@see refresh_runtime()}: concurrent viewers and editor/form saves must not
+     * delete each other's extraction. A busy lock or a corrupt package leaves the page
+     * on its "no content" branch instead of throwing into the learner view.
+     *
+     * @param int $contextid Module context id.
+     * @param stdClass $instance Activity row; its revision is refreshed in place.
+     * @return \stored_file|null The servable index.html, or null when there is none.
+     */
+    public static function self_heal(int $contextid, stdClass $instance): ?\stored_file {
+        global $DB;
+
+        $fs = get_file_storage();
+        $entry = $fs->get_file($contextid, 'mod_exelearning', 'content', (int) $instance->revision, '/', 'index.html') ?: null;
+        // The gradesyncrev marker keeps content-only packages from being rescanned on
+        // every view: grade_sync stamps max(revision, 1) once a revision is scanned.
+        $needssync = (int) $instance->gradesyncrev < max((int) $instance->revision, 1);
+        if (($entry && !$needssync) || !self::get_stored_package($contextid)) {
+            return $entry;
+        }
+        $lock = self::get_package_lock((int) $instance->id);
+        if (!$lock) {
+            return $entry;
+        }
+        try {
+            // Another request may have healed or replaced the package while we waited.
+            $current = $DB->get_record('exelearning', ['id' => $instance->id], 'id, revision, gradesyncrev', MUST_EXIST);
+            $instance->revision = (int) $current->revision;
+            $entry = $fs->get_file($contextid, 'mod_exelearning', 'content', $instance->revision, '/', 'index.html') ?: null;
+            if (!$entry) {
+                try {
+                    self::extract_stored($contextid, $instance->revision);
+                    $entry = $fs->get_file($contextid, 'mod_exelearning', 'content', $instance->revision, '/', 'index.html')
+                        ?: null;
+                } catch (\moodle_exception $e) {
+                    if ($e->errorcode !== 'migrateextractfailed') {
+                        throw $e;
+                    }
+                    debugging('mod_exelearning: view self-heal could not extract the stored package.', DEBUG_DEVELOPER);
+                }
+            }
+            if ((int) $current->gradesyncrev < max($instance->revision, 1)) {
+                \exelearning_sync_grade_items((int) $instance->id, $contextid);
+            }
+            return $entry;
+        } finally {
+            $lock->release();
+        }
+    }
+
+    /**
      * Whether both extracted SCORM files match this plugin's bundled pair.
      *
      * @param int $contextid Module context id.
