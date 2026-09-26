@@ -31,8 +31,6 @@ require_once($CFG->libdir . '/gradelib.php');
  * @category   test
  * @copyright  2026 ATE (Área de Tecnología Educativa)
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
- * @covers     ::exelearning_grade_item_name
- * @covers     ::exelearning_remove_all_grade_items
  * @covers     ::exelearning_relax_completion_grade_errors
  * @covers     ::exelearning_apply_grade_category
  * @covers     \mod_exelearning\grades\grade_sync
@@ -41,7 +39,7 @@ require_once($CFG->libdir . '/gradelib.php');
  */
 final class lib_grades_test extends advanced_testcase {
     /**
-     * exelearning_grade_item_name() composes "name · [page ·] type" and clamps
+     * \mod_exelearning\grades\grade_item_manager::format_name() composes "name · [page ·] type" and clamps
      * the result to the 255-char column width.
      */
     public function test_grade_item_name_format_and_clamp(): void {
@@ -51,21 +49,24 @@ final class lib_grades_test extends advanced_testcase {
         $withpage = (object) ['idevicetype' => 'trueorfalse', 'pagename' => 'Page 1'];
         $this->assertSame(
             'My Activity · Page 1 · trueorfalse',
-            exelearning_grade_item_name($instance, $withpage)
+            \mod_exelearning\grades\grade_item_manager::format_name($instance, $withpage)
         );
 
         // Without a page name: "name · type".
         $nopage = (object) ['idevicetype' => 'guess', 'pagename' => ''];
-        $this->assertSame('My Activity · guess', exelearning_grade_item_name($instance, $nopage));
+        $this->assertSame('My Activity · guess', \mod_exelearning\grades\grade_item_manager::format_name($instance, $nopage));
 
         // An over-long composed name is clamped to 255 characters.
         $long = (object) ['name' => str_repeat('x', 300)];
-        $clamped = exelearning_grade_item_name($long, (object) ['idevicetype' => 't', 'pagename' => '']);
+        $clamped = \mod_exelearning\grades\grade_item_manager::format_name(
+            $long,
+            (object) ['idevicetype' => 't', 'pagename' => '']
+        );
         $this->assertSame(255, \core_text::strlen($clamped));
     }
 
     /**
-     * exelearning_remove_all_grade_items() soft-deletes every registered item.
+     * \mod_exelearning\grades\grade_item_manager::remove_all() soft-deletes every registered item.
      */
     public function test_remove_all_grade_items(): void {
         global $DB;
@@ -82,7 +83,7 @@ final class lib_grades_test extends advanced_testcase {
             ['exelearningid' => $instance->id, 'deleted' => 0]
         ));
 
-        exelearning_remove_all_grade_items($instance);
+        \mod_exelearning\grades\grade_item_manager::remove_all($instance);
 
         $this->assertSame(0, $DB->count_records(
             'exelearning_grade_item',

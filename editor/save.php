@@ -31,8 +31,6 @@ define('AJAX_SCRIPT', true);
 require('../../../config.php');
 require_once($CFG->dirroot . '/mod/exelearning/lib.php');
 
-use mod_exelearning\exelearning_package_legacy;
-
 $cmid = required_param('cmid', PARAM_INT);
 $format = 'elpx';
 
@@ -50,7 +48,6 @@ exelearning_require_embedded_editor_enabled();
 
 header('Content-Type: application/json; charset=utf-8');
 
-$newpackage = null;
 $lock = null;
 
 try {
@@ -68,73 +65,24 @@ try {
     }
     // The viewer may have refreshed the runtime since this request loaded the row.
     $exelearning = $DB->get_record('exelearning', ['id' => $cm->instance], '*', MUST_EXIST);
-    $newrevision = (int) $exelearning->revision + 1;
-    $fs = get_file_storage();
-    $defaultname = 'package.elpx';
-
     $filename = clean_filename($uploadedfile['name']);
     if (empty($filename)) {
-        $filename = $defaultname;
+        $filename = 'package.elpx';
     }
 
-    $fileinfo = [
-        'contextid' => $context->id,
-        'component' => 'mod_exelearning',
-        'filearea' => 'package',
-        'itemid' => $newrevision,
-        'filepath' => '/',
-        'filename' => $filename,
-        'userid' => $USER->id,
-        'source' => $filename,
-        'author' => fullname($USER),
-        'license' => 'unknown',
-    ];
-
-    $newpackage = $fs->create_file_from_pathname($fileinfo, $uploadedfile['tmp_name']);
-
-    // Keep backwards-compatible preview/index extraction when package contains website structure.
-    $mainfile = false;
-    try {
-        $contentslist = exelearning_package_legacy::expand_package($newpackage);
-        $mainfile = exelearning_package_legacy::get_mainfile(
-            $contentslist,
-            $newpackage->get_contextid(),
-            $newpackage->get_itemid()
-        );
-    } catch (Throwable $e) {
-        // ELPX may not include a web entrypoint; ignore content extraction errors.
-        $mainfile = false;
-    }
-
-    if ($mainfile !== false) {
-        file_set_sortorder(
-            $context->id,
-            'mod_exelearning',
-            'content',
-            $newpackage->get_itemid(),
-            $mainfile->get_filepath(),
-            $mainfile->get_filename(),
-            1
-        );
-        $exelearning->entrypath = $mainfile->get_filepath();
-        $exelearning->entryname = $mainfile->get_filename();
-    }
-
-    $exelearning->timemodified = time();
-    $exelearning->usermodified = $USER->id;
-
-    // Extract and validate the staged revision, then advance the stored pointer and prune
-    // the superseded revision — all only on success (issue 73). A corrupt save throws here
-    // (rolling back the staged content) BEFORE the pointer moves, so the previous package +
-    // content (and revision) stay intact; the catch below drops the just-stored package, so
-    // the activity remains servable and recoverable instead of being left empty. Editing in
-    // the embedded editor can add or remove gradable iDevices, so the gradebook columns are
-    // re-synced afterwards: new iDevices create columns, removed ones are marked deleted
-    // (grade history preserved).
-    \mod_exelearning\local\package_manager::store_and_activate_revision(
-        $context->id,
+    // Stage the package as the next revision, extract and validate it, then advance the
+    // pointer and prune the superseded revision — all only on success (issue 73). A
+    // corrupt save throws BEFORE the pointer moves and drops the staged package, so the
+    // previous package + content (and revision) stay intact. Editing in the embedded
+    // editor can add or remove gradable iDevices, so the gradebook columns are re-synced
+    // afterwards: new iDevices create columns, removed ones are marked deleted (grade
+    // history preserved).
+    \mod_exelearning\local\package_manager::save_editor_package(
+        $context,
         $exelearning,
-        $newrevision
+        $uploadedfile['tmp_name'],
+        $filename,
+        $USER
     );
     $delta = exelearning_sync_grade_items($exelearning->id, $context->id);
     // If editing changed the gradable set (added/removed/edited-options) and
@@ -149,14 +97,14 @@ try {
         'format' => $format,
     ]);
 } catch (Throwable $e) {
-    if ($newpackage) {
-        $newpackage->delete();
-    }
     debugging('mod_exelearning editor save failed: ' . $e->getMessage(), DEBUG_DEVELOPER);
     http_response_code(500);
+    // A moodle_exception message is a translated string meant for users (e.g. the
+    // maxbytesfile limit from package_manager), so the editor can show it; any other
+    // Throwable may leak internals (paths, SQL), so it stays generic.
     echo json_encode([
         'success' => false,
-        'error' => get_string('error'),
+        'error' => $e instanceof moodle_exception ? $e->getMessage() : get_string('error'),
     ]);
 } finally {
     if ($lock) {
