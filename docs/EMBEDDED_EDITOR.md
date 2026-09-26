@@ -101,23 +101,23 @@ messages:
 | Direction | Type | Purpose |
 |-----------|------|---------|
 | host → editor | `CONFIGURE` | sent on `EXELEARNING_READY`, hides file menu / save / user menu (`:465-478`) |
-| host → editor | `OPEN_FILE` | sends the current package as an `ArrayBuffer` (transferable) with a `requestId` (`:341-352`) |
 | host → editor | `REQUEST_EXPORT` | asks the editor to export the current document (`:414-430`) |
 | editor → host | `EXELEARNING_READY` / `DOCUMENT_LOADED` / `DOCUMENT_CHANGED` | lifecycle (`:464-488`) |
-| editor → host | `OPEN_FILE_SUCCESS` / `OPEN_FILE_ERROR` | open ack, matched by `requestId` (`:490-506`) |
-| editor → host | `EXPORT_FILE` | returns the exported bytes for upload (`:508-517`) |
+| editor → host | `EXPORT_FILE` / `REQUEST_EXPORT_ERROR` | returns the exported bytes for upload, or the export error |
 
-A legacy `exeweb-editor` message dialect is still handled for older static
-builds (`handleLegacyBridgeMessage()` `:537-560`).
+The host never sends `OPEN_FILE`: the editor loads the current package itself
+from `initialProjectUrl` in `__EXE_EMBEDDING_CONFIG__` (`editor/index.php`).
 
-### Request de-dup, retry and backoff
+`DOCUMENT_LOADED` and `DOCUMENT_CHANGED` come from the injected
+`amd/src/moodle_exe_bridge.js`, which also forwards Ctrl/Cmd+S inside the editor
+as an `exeweb-editor` `request-save` message; that is the only message of the
+`exeweb-editor` dialect the host still acts on (its `editor-ready` is ignored).
 
-Each request carries a unique `requestId` from `nextRequestId()` (`:45-48`).
-Responses are accepted only when their `requestId` matches the pending
-`openRequestId` / `exportRequestId` (`:491`, `:500`, `:509`). The initial
-`OPEN_FILE` is retried up to `MAX_OPEN_ATTEMPTS = 3` with linear backoff
-(`scheduleOpenRetry()` `:269-277`, `armOpenResponseTimer()` `:284-295`,
-`OPEN_RESPONSE_TIMEOUT_MS = 3000` `:22`).
+### Request matching
+
+Each request carries a unique `requestId` from `nextRequestId()`.
+`EXPORT_FILE` / `REQUEST_EXPORT_ERROR` are accepted only when their `requestId`
+matches the pending `exportRequestId`.
 
 ### Origin handling — current behavior and a hardening opportunity
 
@@ -172,6 +172,11 @@ The "Save to Moodle" button drives the export round-trip
    `updateContentUrlRevision()` `:98-112`), refreshes the activity iframe, then
    reloads `view.php` so server-rendered blocks reflect the re-synced gradebook
    (`:393-406`).
+5. On failure (export error, non-OK HTTP status or a non-JSON body such as a web
+   server 413 page) the overlay header shows the translated `editorsavefailed`
+   message with the server's error and re-enables the save button. `save.php`
+   returns the message of a `moodle_exception` (e.g. `maxbytesfile`) and a generic
+   error for any other `Throwable`.
 
 ## 4. Relation to the eXeLearning LMS-embedding model
 

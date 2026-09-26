@@ -99,9 +99,12 @@ try {
 } catch (Throwable $e) {
     debugging('mod_exelearning editor save failed: ' . $e->getMessage(), DEBUG_DEVELOPER);
     http_response_code(500);
+    // A moodle_exception message is a translated string meant for users (e.g. the
+    // maxbytesfile limit from package_manager), so the editor can show it; any other
+    // Throwable may leak internals (paths, SQL), so it stays generic.
     echo json_encode([
         'success' => false,
-        'error' => get_string('error'),
+        'error' => $e instanceof moodle_exception ? $e->getMessage() : get_string('error'),
     ]);
 } finally {
     if ($lock) {
