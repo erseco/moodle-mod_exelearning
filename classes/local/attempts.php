@@ -62,6 +62,85 @@ class attempts {
     }
 
     /**
+     * Whether a learner may review their own past attempts, per the reviewmode setting.
+     *
+     * The single rule behind the attempts list on view.php and the attempts history
+     * returned by the get_user_attempts web service, so the app cannot show what the
+     * web page hides (SEC-002, CWE-285).
+     *
+     * @param \stdClass $exelearning Instance record (reads reviewmode).
+     * @param \cm_info|\stdClass $cm Course module.
+     * @param \stdClass $course Course record.
+     * @param int $userid The learner.
+     * @return bool
+     */
+    public static function can_review(\stdClass $exelearning, $cm, \stdClass $course, int $userid): bool {
+        global $CFG;
+        require_once($CFG->libdir . '/completionlib.php');
+
+        $reviewmode = (int) ($exelearning->reviewmode ?? self::REVIEW_ALWAYS);
+        if ($reviewmode === self::REVIEW_ALWAYS) {
+            return true;
+        }
+        if ($reviewmode !== self::REVIEW_AFTERCOMPLETION) {
+            return false;
+        }
+        $cinfo = new \completion_info($course);
+        if (!$cinfo->is_enabled($cm)) {
+            return false;
+        }
+        $cdata = $cinfo->get_data($cm, false, $userid);
+        return in_array((int) $cdata->completionstate, [COMPLETION_COMPLETE, COMPLETION_COMPLETE_PASS], true);
+    }
+
+    /**
+     * Whether the current user may see another user's attempts/grades on this activity.
+     *
+     * Callers have already checked mod/exelearning:viewreport. The target must be
+     * enrolled in the course and, in separate groups mode without
+     * moodle/site:accessallgroups, share one of the viewer's allowed groups (within the
+     * activity grouping). Shared by report.php and the get_user_attempts /
+     * get_user_grades services so web and mobile enforce the same boundary
+     * (SEC-001 CWE-863, SEC-009 CWE-359).
+     *
+     * @param \cm_info|\stdClass $cm Course module.
+     * @param \context_module $context Module context.
+     * @param int $userid The user whose data is requested.
+     * @return bool
+     */
+    public static function can_view_user_data($cm, \context_module $context, int $userid): bool {
+        if (!is_enrolled($context, $userid)) {
+            return false;
+        }
+        if (
+            groups_get_activity_groupmode($cm) != SEPARATEGROUPS
+                || has_capability('moodle/site:accessallgroups', $context)
+        ) {
+            return true;
+        }
+        $allowed = array_keys(groups_get_activity_allowed_groups($cm));
+        $usergroups = groups_get_user_groups($cm->course, $userid)[(int) $cm->groupingid] ?? [];
+        return (bool) array_intersect($allowed, $usergroups);
+    }
+
+    /**
+     * Neutralise a spreadsheet cell that a spreadsheet would run as a formula.
+     *
+     * Prefixes a single quote to strings starting with = + - @ (after leading
+     * whitespace) or with a tab / carriage return, as OWASP recommends for CSV
+     * injection (SEC-008, CWE-1236). Non-strings are returned unchanged.
+     *
+     * @param mixed $value Cell value.
+     * @return mixed
+     */
+    public static function neutralise_spreadsheet_cell($value) {
+        if (is_string($value) && preg_match('/^(?:[\t\r]|\s*[=+\-@])/', $value)) {
+            return "'" . $value;
+        }
+        return $value;
+    }
+
+    /**
      * Count distinct GRADABLE attempts a user has on an activity (for maxattempt).
      *
      * Ungraded-period attempts (gradable = 0) are excluded on purpose. maxattempt is a
