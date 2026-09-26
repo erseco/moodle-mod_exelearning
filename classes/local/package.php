@@ -570,14 +570,13 @@ class package {
      * @return string|null File contents, or null if not found.
      */
     private function read_content_xml(): ?string {
-        $packer = get_file_packer('application/zip');
         $tmpdir = make_request_directory();
-        $extracted = $this->file->extract_to_pathname(
-            $packer,
-            $tmpdir,
-            null,
-            true
-        );
+        // Extract ONLY content.xml, not the whole archive (media included) on every
+        // scan. The packer drops the $onlyfiles filter when handed a stored_file, so
+        // copy the archive out first and extract from the path (same as package_probe).
+        $ziptmp = $tmpdir . '/package.zip';
+        $this->file->copy_content_to($ziptmp);
+        $extracted = get_file_packer('application/zip')->extract_to_pathname($ziptmp, $tmpdir, ['content.xml']);
         if (!is_array($extracted)) {
             return null;
         }
