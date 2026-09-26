@@ -39,7 +39,6 @@ $string['attemptsmanagementheading'] = '~Saialdien kudeaketa';
 $string['attemptsofmax'] = '~Saialdiak: {$a->used} / {$a->max}';
 $string['attemptsreport'] = '~Saialdien txostena';
 $string['attemptsused'] = '~Erabilitako saialdiak: {$a}';
-$string['badexelearningpackage'] = '~Igotako fitxategia ez da baliozko eXeLearning pakete bat.';
 $string['completiondetail:status'] = '~Iritsi egoera honetara: {$a}';
 $string['completionstatus_any'] = '~Gainditua edo osatua';
 $string['completionstatus_completed'] = '~Osatua';

@@ -39,7 +39,6 @@ $string['attemptsmanagementheading'] = '~Gestió d\'intents';
 $string['attemptsofmax'] = '~Intents: {$a->used} de {$a->max}';
 $string['attemptsreport'] = '~Informe d\'intents';
 $string['attemptsused'] = '~Intents utilitzats: {$a}';
-$string['badexelearningpackage'] = '~El fitxer pujat no és un paquet eXeLearning vàlid.';
 $string['completiondetail:status'] = '~Assolir l\'estat: {$a}';
 $string['completionstatus_any'] = '~Aprovat o completat';
 $string['completionstatus_completed'] = '~Completat';

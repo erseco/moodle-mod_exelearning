@@ -35,7 +35,6 @@ $string['attemptsmanagementheading'] = 'Attempts management';
 $string['attemptsofmax']      = 'Attempts: {$a->used} of {$a->max}';
 $string['attemptsreport']    = 'Attempts report';
 $string['attemptsused']       = 'Attempts used: {$a}';
-$string['badexelearningpackage'] = 'The uploaded file is not a valid eXeLearning package.';
 $string['completiondetail:status'] = 'Reach status: {$a}';
 $string['completionstatus_any']       = 'Passed or completed';
 $string['completionstatus_completed'] = 'Completed';
