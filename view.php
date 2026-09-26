@@ -326,21 +326,8 @@ if (!$mainfile) {
             echo html_writer::div($label, $class);
         }
         // Review of previous attempts, according to reviewmode.
-        $reviewmode = (int) ($exelearning->reviewmode
-                ?? \mod_exelearning\local\attempts::REVIEW_ALWAYS);
-        $iscomplete = false;
-        $cinfo = new completion_info($course);
-        if ($cinfo->is_enabled($cm)) {
-            $cdata = $cinfo->get_data($cm, false, $USER->id);
-            $iscomplete = in_array(
-                (int) $cdata->completionstate,
-                [COMPLETION_COMPLETE, COMPLETION_COMPLETE_PASS],
-                true
-            );
-        }
-        $canreview = ($reviewmode === \mod_exelearning\local\attempts::REVIEW_ALWAYS)
-                || ($reviewmode === \mod_exelearning\local\attempts::REVIEW_AFTERCOMPLETION
-                        && $iscomplete);
+        // Shared with the get_user_attempts web service (SEC-002).
+        $canreview = \mod_exelearning\local\attempts::can_review($exelearning, $cm, $course, (int) $USER->id);
         if ($canreview && $used > 0) {
             $list = [];
             foreach ($myattempts as $ma) {
