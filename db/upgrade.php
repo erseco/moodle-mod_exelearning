@@ -622,5 +622,21 @@ function xmldb_exelearning_upgrade($oldversion) {
         upgrade_mod_savepoint(true, 2026082101, 'exelearning');
     }
 
+    // Stage 23 (2026092603): drop exelearning.entrypath and exelearning.entryname. The
+    // editor save endpoint was their only writer and it no longer sets them; nothing reads
+    // them either (the package is always served from its index.html). Restoring an
+    // older backup that still carries the two values is safe: insert_record() skips
+    // columns the table does not have.
+    if ($oldversion < 2026092603) {
+        $table = new xmldb_table('exelearning');
+        foreach (['entrypath', 'entryname'] as $name) {
+            $field = new xmldb_field($name);
+            if ($dbman->field_exists($table, $field)) {
+                $dbman->drop_field($table, $field);
+            }
+        }
+        upgrade_mod_savepoint(true, 2026092603, 'exelearning');
+    }
+
     return true;
 }

@@ -79,6 +79,37 @@ function exelearning_supports($feature) {
 }
 
 /**
+ * Fill the instance settings a caller may omit with their defaults.
+ *
+ * Shared by add and update so both write the same NOT NULL defaults; only
+ * unset values are touched, submitted ones are kept.
+ *
+ * @param stdClass $data Instance data, modified in place.
+ * @return void
+ */
+function exelearning_apply_instance_defaults(stdClass $data): void {
+    $defaults = [
+        'grademax' => 100,
+        'grademin' => 0,
+        'gradepass' => 0,
+        'grademethod' => \mod_exelearning\local\attempts::GRADE_HIGHEST,
+        'grademodel' => EXELEARNING_GRADEMODEL_PERITEM,
+        'maxattempt' => 0,
+        'reviewmode' => \mod_exelearning\local\attempts::REVIEW_ALWAYS,
+        'teachermodevisible' => 0,
+        'gradecat' => 0,
+        // Custom completion rule (DEC-69-01): NULL disables the rule. mod_form's
+        // data_postprocessing() normalises the submitted value to an int or null.
+        'completionstatusrequired' => null,
+    ];
+    foreach ($defaults as $field => $default) {
+        if (!isset($data->$field)) {
+            $data->$field = $default;
+        }
+    }
+}
+
+/**
  * Add new instance.
  *
  * @param stdClass $data
@@ -91,39 +122,7 @@ function exelearning_add_instance($data, $mform = null) {
     $data->timecreated = time();
     $data->timemodified = $data->timecreated;
     $data->revision = 1;
-    if (!isset($data->grademax)) {
-        $data->grademax = 100;
-    }
-    if (!isset($data->grademin)) {
-        $data->grademin = 0;
-    }
-    if (!isset($data->gradepass)) {
-        $data->gradepass = 0;
-    }
-    if (!isset($data->grademethod)) {
-        $data->grademethod = \mod_exelearning\local\attempts::GRADE_HIGHEST;
-    }
-    if (!isset($data->grademodel)) {
-        $data->grademodel = EXELEARNING_GRADEMODEL_PERITEM;
-    }
-    if (!isset($data->maxattempt)) {
-        $data->maxattempt = 0;
-    }
-    if (!isset($data->reviewmode)) {
-        $data->reviewmode = \mod_exelearning\local\attempts::REVIEW_ALWAYS;
-    }
-    if (!isset($data->teachermodevisible)) {
-        $data->teachermodevisible = 0;
-    }
-    if (!isset($data->gradecat)) {
-        $data->gradecat = 0;
-    }
-    // Custom completion rule (DEC-69-01): NULL disables the rule. mod_form's
-    // data_postprocessing() already normalises the submitted value to an int or
-    // null; default to null when the caller does not provide it.
-    if (!isset($data->completionstatusrequired)) {
-        $data->completionstatusrequired = null;
-    }
+    exelearning_apply_instance_defaults($data);
 
     $data->id = $DB->insert_record('exelearning', $data);
 
@@ -170,39 +169,7 @@ function exelearning_update_instance($data, $mform = null) {
             MUST_EXIST
         );
         $data->revision = (int) ($oldrow->revision ?: 0) + 1;
-        if (!isset($data->grademax)) {
-            $data->grademax = 100;
-        }
-        if (!isset($data->grademin)) {
-            $data->grademin = 0;
-        }
-        if (!isset($data->gradepass)) {
-            $data->gradepass = 0;
-        }
-        if (!isset($data->grademethod)) {
-            $data->grademethod = \mod_exelearning\local\attempts::GRADE_HIGHEST;
-        }
-        if (!isset($data->grademodel)) {
-            $data->grademodel = EXELEARNING_GRADEMODEL_PERITEM;
-        }
-        if (!isset($data->maxattempt)) {
-            $data->maxattempt = 0;
-        }
-        if (!isset($data->reviewmode)) {
-            $data->reviewmode = \mod_exelearning\local\attempts::REVIEW_ALWAYS;
-        }
-        if (!isset($data->teachermodevisible)) {
-            $data->teachermodevisible = 0;
-        }
-        if (!isset($data->gradecat)) {
-            $data->gradecat = 0;
-        }
-        // Custom completion rule (DEC-69-01): NULL disables the rule. mod_form's
-        // data_postprocessing() sets this to an int or null; default to null when the
-        // caller does not provide it so an update never leaves a stray stale value.
-        if (!isset($data->completionstatusrequired)) {
-            $data->completionstatusrequired = null;
-        }
+        exelearning_apply_instance_defaults($data);
 
         $contextid = context_module::instance($data->coursemodule)->id;
 
@@ -764,62 +731,6 @@ function exelearning_extract_stored_package(int $contextid, int $revision): void
 }
 
 /**
- * Injects SCORM wrapper script tags into the <head> of index.html and all
- * html/<slug>.html pages of the extracted package.
- *
- * @param int $contextid
- * @param int $revision
- */
-function exelearning_inject_scorm_loader(int $contextid, int $revision): void {
-    \mod_exelearning\local\scorm\scorm_injector::inject($contextid, $revision);
-}
-
-/**
- * Drop the `body.exe-scorm` condition from the score-save guard of the `form` and
- * `scrambled-list` iDevices in the extracted package (issue #13).
- *
- * eXeLearning's `exe-scorm` body class is its "running as a SCORM export" switch.
- * The web/elpx export we serve does not carry it, and 49 of 51 iDevices either do
- * not touch it or only use it to load the SCORM wrapper (which we already inject).
- * Only `form` and `scrambled-list` put `body.hasClass('exe-scorm')` in front of
- * their `sendScore()` call, so they never persist their score here — their
- * cmi.suspend_data entry stays at the seeded 0 (the gradebook shows 0).
- *
- * Rather than add `exe-scorm` to the body (which would also switch on the SCO page
- * lifecycle and the SCORM presentation CSS), we apply the same one-line change
- * upstream describes (exelearning/exelearning#1925) at serve time, only to these
- * two save guards, so they behave like every other gradable iDevice (save on
- * `isScorm > 0`). The patch targets the unique `data.isScorm` variant of the guard
- * (the init-time guards use `ldata.isScorm`), is idempotent (the matched string is
- * removed), and degrades safely: if a future producer reformats the guard the
- * replace is a no-op and behaviour reverts to today's. See research ADR DEC-13-11.
- *
- * @param int $contextid
- * @param int $revision
- */
-function exelearning_patch_idevice_save_guards(int $contextid, int $revision): void {
-    \mod_exelearning\local\scorm\idevice_patch::patch($contextid, $revision);
-}
-
-/**
- * Removes all gradebook items of an activity (master grading switch off, DEC-13-07).
- *
- * Soft-deletes the plugin's grade-item mapping rows and deletes the matching Moodle
- * grade items, including the overall item (itemnumber 0), so nothing shows in the
- * gradebook. The attempt history (exelearning_attempt) is preserved, so re-enabling
- * grading re-detects and recomputes from it. This function and sync() only do the
- * re-detect half; the recompute is the exelearning_update_grades() call in
- * exelearning_update_instance(), reached because gradeenabled is one of the grading
- * fields that trigger a republish from history (DEC-124-01).
- *
- * @param stdClass $instance The exelearning instance row.
- * @return void
- */
-function exelearning_remove_all_grade_items(stdClass $instance): void {
-    \mod_exelearning\grades\grade_item_manager::remove_all($instance);
-}
-
-/**
  * Detects gradable iDevices in the stored package and synchronises grade items.
  *
  * Returns the change delta against the previously synced state so callers can
@@ -907,17 +818,6 @@ function exelearning_recalculate_grades_for_users(stdClass $instance, array $use
 }
 
 /**
- * Human-readable label for the gradebook column of an iDevice.
- *
- * @param stdClass $instance
- * @param stdClass $detected
- * @return string
- */
-function exelearning_grade_item_name(stdClass $instance, stdClass $detected): string {
-    return \mod_exelearning\grades\grade_item_manager::format_name($instance, $detected);
-}
-
-/**
  * Relaxes core's "completion grade item has no grade field" validation error for a
  * registered gradable item (B7, DEC-34-01).
  *
@@ -990,24 +890,6 @@ function exelearning_apply_grade_category(stdClass $instance): void {
  */
 function exelearning_get_package_url($exelearning, $context) {
     return \mod_exelearning\local\package_manager::get_package_url($exelearning, $context);
-}
-
-/**
- * Builds the activity view URL a gradebook grade item should resolve to.
- *
- * The Moodle gradebook links each activity grade item to /mod/exelearning/grade.php
- * passing its itemnumber (same pattern as core mod_h5pactivity). This maps that
- * itemnumber to the owning iDevice's stable objectid so the view can deep-link
- * straight to that iDevice instead of the resource front page (issue #13 #4,
- * DEC-13-02). itemnumber 0 (the overall grade) links to the front page.
- *
- * @param stdClass $exelearning Instance record.
- * @param int $cmid Course module id.
- * @param int $itemnumber Grade item number (0 = overall, > 0 = per-iDevice).
- * @return moodle_url View URL, with an `idevice` parameter when one is known.
- */
-function exelearning_grade_item_view_url(stdClass $exelearning, int $cmid, int $itemnumber): moodle_url {
-    return \mod_exelearning\local\urls::grade_item_view_url($exelearning, $cmid, $itemnumber);
 }
 
 /**
