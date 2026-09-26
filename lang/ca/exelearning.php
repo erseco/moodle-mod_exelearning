@@ -54,6 +54,7 @@ $string['editordisabled'] = '~Desactiva l\'editor integrat';
 $string['editordisabled_desc'] = '~Si es marca, el connector funciona com un reproductor pur: pujar i mostrar paquets .elpx continua funcionant, però el botó «Edita amb eXeLearning» s\'amaga i els punts finals de l\'editor rebutgen les peticions. Deixeu-la sense marcar (el valor per defecte) perquè els qui poden gestionar una activitat editin els paquets des de Moodle.';
 $string['editordisabledbyadmin'] = '~L\'edició integrada està desactivada en aquest lloc. L\'activitat continua reproduint els paquets eXeLearning pujats; contacteu amb l\'administrador si necessiteu editar des de Moodle.';
 $string['editorreaderror'] = 'No s\'han pogut llegir els fitxers de l\'editor integrat eXeLearning. Comproveu els permisos dels fitxers i contacteu amb l\'administrador.';
+$string['editorsavefailed'] = '~No s\'ha pogut desar el paquet: {$a}';
 $string['editorsettings'] = '~Editor integrat';
 $string['editwitheditor'] = '~Edita amb eXeLearning';
 $string['embeddednotinstalledadmin'] = '~L\'editor integrat no està inclòs en aquesta instal·lació. Instal·leu el connector des d\'un ZIP de versió oficial, que inclou l\'editor.';
