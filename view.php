@@ -75,66 +75,12 @@ if ($showeditorbutton) {
     $PAGE->requires->js_call_amd('mod_exelearning/editor_modal', 'init', []);
 }
 
-$fs = get_file_storage();
 \mod_exelearning\local\package_manager::refresh_runtime($context->id, $exelearning);
-$mainfile = $fs->get_file(
-    $context->id,
-    'mod_exelearning',
-    'content',
-    (int) $exelearning->revision,
-    '/',
-    'index.html'
-);
-
-// Self-heal for programmatic uploads (e.g. the Moodle Playground `addModule`):
-// if the ELPX is in the 'package' filearea but the content was not extracted or
-// the grade items were not detected (because that path bypassed
-// exelearning_add_instance), recover here. Idempotent: only acts when something
-// is missing, so it does not penalise the normal view.
-$haspackage = (exelearning_get_stored_package($context->id) !== null);
-if ($haspackage) {
-    if (!$mainfile) {
-        exelearning_extract_stored_package($context->id, (int) $exelearning->revision);
-        $mainfile = $fs->get_file(
-            $context->id,
-            'mod_exelearning',
-            'content',
-            (int) $exelearning->revision,
-            '/',
-            'index.html'
-        );
-    }
-    // Self-heal the secure-mode bridge client (DEC-80-02) into packages extracted
-    // before it existed: if index.html is present but libs/exe_scorm_bridge.js is not,
-    // re-extract once so the bridge scripts are copied and injected. Idempotent and
-    // bounded (only fires until the file exists).
-    if ($mainfile) {
-        $hasbridge = $fs->get_file(
-            $context->id,
-            'mod_exelearning',
-            'content',
-            (int) $exelearning->revision,
-            '/libs/',
-            'exe_scorm_bridge.js'
-        );
-        if (!$hasbridge) {
-            exelearning_extract_stored_package($context->id, (int) $exelearning->revision);
-        }
-    }
-    // Self-heal grade-item detection, but only when this package revision has
-    // not been scanned yet (gradesyncrev marker). This used to fire whenever the
-    // activity had no gradable grade item, which for a content-only package
-    // (0 gradable iDevices) is PERMANENTLY true and re-extracted + re-parsed the
-    // entire ELPX on every single view — a self-inflicted DoS on the most common
-    // package type. exelearning_sync_grade_items() stamps max(revision, 1) once
-    // it has scanned, so each revision is scanned at most once;
-    // exelearning_update_instance() bumps revision to re-arm a scan when the
-    // content changes.
-    $synctarget = max((int) $exelearning->revision, 1);
-    if ((int) $exelearning->gradesyncrev < $synctarget) {
-        exelearning_sync_grade_items($exelearning->id, $context->id);
-    }
-}
+// Self-heal for programmatic uploads (e.g. the Moodle Playground `addModule`) that
+// stored the ELPX without extracting it or scanning its grade items, and for packages
+// extracted before the secure-mode bridge client existed (DEC-80-02). It only acts
+// when something is missing and runs under the package lock; null means no content.
+$mainfile = \mod_exelearning\local\package_manager::self_heal($context->id, $exelearning);
 
 echo $OUTPUT->header();
 echo $OUTPUT->heading(format_string($exelearning->name));
@@ -420,21 +366,8 @@ if (!$mainfile) {
             echo html_writer::div($label, $class);
         }
         // Review of previous attempts, according to reviewmode.
-        $reviewmode = (int) ($exelearning->reviewmode
-                ?? \mod_exelearning\local\attempts::REVIEW_ALWAYS);
-        $iscomplete = false;
-        $cinfo = new completion_info($course);
-        if ($cinfo->is_enabled($cm)) {
-            $cdata = $cinfo->get_data($cm, false, $USER->id);
-            $iscomplete = in_array(
-                (int) $cdata->completionstate,
-                [COMPLETION_COMPLETE, COMPLETION_COMPLETE_PASS],
-                true
-            );
-        }
-        $canreview = ($reviewmode === \mod_exelearning\local\attempts::REVIEW_ALWAYS)
-                || ($reviewmode === \mod_exelearning\local\attempts::REVIEW_AFTERCOMPLETION
-                        && $iscomplete);
+        // Shared with the get_user_attempts web service (SEC-002).
+        $canreview = \mod_exelearning\local\attempts::can_review($exelearning, $cm, $course, (int) $USER->id);
         if ($canreview && $used > 0) {
             $list = [];
             foreach ($myattempts as $ma) {

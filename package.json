@@ -11,8 +11,8 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.58.2",
-    "@vitest/coverage-v8": "^5.0.0",
-    "happy-dom": "^20.14.3",
+    "@vitest/coverage-v8": "^5.0.1",
+    "happy-dom": "^20.14.5",
     "vitest": "^5.0.0"
   }
 }

@@ -140,6 +140,38 @@ final class lib_test extends advanced_testcase {
     }
 
     /**
+     * exelearning_apply_instance_defaults(), shared by add and update, fills only
+     * the settings the caller left unset and keeps every submitted value.
+     *
+     * @covers ::exelearning_apply_instance_defaults
+     */
+    public function test_apply_instance_defaults(): void {
+        $data = (object) ['grademax' => 10, 'grademethod' => 1, 'completionstatusrequired' => 2];
+        exelearning_apply_instance_defaults($data);
+
+        // Submitted values survive.
+        $this->assertSame(10, $data->grademax);
+        $this->assertSame(1, $data->grademethod);
+        $this->assertSame(2, $data->completionstatusrequired);
+
+        // Unset ones get the defaults, including a null (disabled) completion rule.
+        $this->assertSame(0, $data->grademin);
+        $this->assertSame(0, $data->gradepass);
+        $this->assertSame(EXELEARNING_GRADEMODEL_PERITEM, $data->grademodel);
+        $this->assertSame(0, $data->maxattempt);
+        $this->assertSame(\mod_exelearning\local\attempts::REVIEW_ALWAYS, $data->reviewmode);
+        $this->assertSame(0, $data->teachermodevisible);
+        $this->assertSame(0, $data->gradecat);
+
+        $empty = new \stdClass();
+        exelearning_apply_instance_defaults($empty);
+        $this->assertSame(100, $empty->grademax);
+        $this->assertSame(\mod_exelearning\local\attempts::GRADE_HIGHEST, $empty->grademethod);
+        $this->assertTrue(property_exists($empty, 'completionstatusrequired'));
+        $this->assertNull($empty->completionstatusrequired);
+    }
+
+    /**
      * A multi-page package registers one grade item per gradable iDevice, keyed by
      * the iDevice's stable objectid, even when those iDevices live on different
      * pages and share the same page-local DOM index (the RIE-007 / DEC-5-01 case).
@@ -469,7 +501,7 @@ final class lib_test extends advanced_testcase {
      * dml_write_exception that aborts add/update and white-screens the view.php
      * self-heal for students (B5, DEC-34-01).
      *
-     * @covers ::exelearning_grade_item_name
+     * @covers \mod_exelearning\grades\grade_item_manager
      */
     public function test_long_grade_item_name_is_clamped(): void {
         global $DB;
@@ -551,7 +583,7 @@ final class lib_test extends advanced_testcase {
      * init-time guard (the `ldata.isScorm` variant) and unrelated files untouched,
      * and is idempotent.
      *
-     * @covers ::exelearning_patch_idevice_save_guards
+     * @covers \mod_exelearning\local\scorm\idevice_patch
      */
     public function test_patch_idevice_save_guards(): void {
         $instance = $this->create_activity();
@@ -581,7 +613,7 @@ final class lib_test extends advanced_testcase {
         $write('/idevices/form/', 'form.js', "a;\n{$formsave}\n  send();\n}\n{$forminit}\n  label();\n}\n");
         $write('/idevices/scrambled-list/', 'scrambled-list.js', "b;\n{$scrsave}\n  send();\n  return;\n}\n");
 
-        exelearning_patch_idevice_save_guards($contextid, $revision);
+        \mod_exelearning\local\scorm\idevice_patch::patch($contextid, $revision);
 
         $form = $read('/idevices/form/', 'form.js');
         $scr  = $read('/idevices/scrambled-list/', 'scrambled-list.js');
@@ -593,7 +625,7 @@ final class lib_test extends advanced_testcase {
         $this->assertStringContainsString($forminit, $form);
 
         // Idempotent: a second run is a no-op (the guard is already gone).
-        exelearning_patch_idevice_save_guards($contextid, $revision);
+        \mod_exelearning\local\scorm\idevice_patch::patch($contextid, $revision);
         $this->assertStringContainsString('if (data.isScorm > 0) {', $read('/idevices/form/', 'form.js'));
     }
 
@@ -603,13 +635,11 @@ final class lib_test extends advanced_testcase {
      * on `body.exe-scorm`. The patch strips the two known offenders (form,
      * scrambled-list); if a future eXeLearning release ships another iDevice with
      * the same coupling — or the patch stops matching — this test fails, telling
-     * the maintainer to add that guard to exelearning_patch_idevice_save_guards().
+     * the maintainer to add that guard to \mod_exelearning\local\scorm\idevice_patch::patch().
      *
      * Coverage is limited to the iDevice types present in the fixture (superelpx,
      * ~30 of the 51 iDevices, including form + scrambled-list); the plugin only
      * ever sees the iDevices an uploaded package actually contains.
-     *
-     * @covers ::exelearning_patch_idevice_save_guards
      */
     public function test_no_idevice_keeps_an_exe_scorm_save_guard(): void {
         $instance = $this->create_activity(
@@ -651,7 +681,7 @@ final class lib_test extends advanced_testcase {
             [],
             $offenders,
             'An iDevice still gates its score-save on body.exe-scorm after extraction. '
-                . 'Add its save guard to exelearning_patch_idevice_save_guards() '
+                . 'Add its save guard to \mod_exelearning\local\scorm\idevice_patch::patch() '
                 . '(issue #13 / DEC-13-11): ' . implode(', ', $offenders)
         );
     }
@@ -853,7 +883,7 @@ final class lib_test extends advanced_testcase {
     }
 
     /**
-     * Gradebook deep-link (issue #13 #4, DEC-13-02): exelearning_grade_item_view_url()
+     * Gradebook deep-link (issue #13 #4, DEC-13-02): \mod_exelearning\local\urls::grade_item_view_url()
      * maps an itemnumber to its iDevice objectid so grade.php can forward the click
      * straight to that iDevice; itemnumber 0 and unknown numbers fall back to the
      * activity front page.
@@ -865,7 +895,7 @@ final class lib_test extends advanced_testcase {
         $cm = get_coursemodule_from_instance('exelearning', $instance->id);
 
         // The overall grade (itemnumber 0) links to the front page, no deep link.
-        $overall = exelearning_grade_item_view_url($instance, (int) $cm->id, 0);
+        $overall = \mod_exelearning\local\urls::grade_item_view_url($instance, (int) $cm->id, 0);
         $this->assertArrayNotHasKey('idevice', $overall->params());
         $this->assertSame((string) $cm->id, (string) $overall->params()['id']);
 
@@ -876,11 +906,11 @@ final class lib_test extends advanced_testcase {
             'deleted'       => 0,
         ]);
         $this->assertNotEmpty($objectid);
-        $deeplink = exelearning_grade_item_view_url($instance, (int) $cm->id, 1);
+        $deeplink = \mod_exelearning\local\urls::grade_item_view_url($instance, (int) $cm->id, 1);
         $this->assertSame($objectid, $deeplink->params()['idevice']);
 
         // An unknown itemnumber degrades gracefully to the front page.
-        $unknown = exelearning_grade_item_view_url($instance, (int) $cm->id, 99);
+        $unknown = \mod_exelearning\local\urls::grade_item_view_url($instance, (int) $cm->id, 99);
         $this->assertArrayNotHasKey('idevice', $unknown->params());
     }
 

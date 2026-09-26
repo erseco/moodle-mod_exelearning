@@ -733,6 +733,42 @@ final class package_test extends advanced_testcase {
     }
 
     /**
+     * Detection reads only content.xml: the package media is never extracted to temp.
+     *
+     * Regression: stored_file::extract_to_pathname() ignores an $onlyfiles filter, so every
+     * scan used to extract the whole archive, media included.
+     */
+    public function test_detection_extracts_only_content_xml(): void {
+        $this->resetAfterTest();
+
+        $tmp = make_request_directory();
+        file_put_contents($tmp . '/content.xml', $this->build_content_xml([
+            ['p1', 'idevice-tf', 'trueorfalse', "<answer>true</answer>\n", 1],
+        ]));
+        file_put_contents($tmp . '/source.bin', random_bytes(64));
+        $zippath = make_request_directory() . '/pkg.elpx';
+        get_file_packer('application/zip')->archive_to_pathname([
+            'content.xml' => $tmp . '/content.xml',
+            'content/resources/unextracted-media.bin' => $tmp . '/source.bin',
+        ], $zippath);
+        $file = get_file_storage()->create_file_from_pathname([
+            'contextid' => \context_system::instance()->id, 'component' => 'mod_exelearning',
+            'filearea' => 'package', 'itemid' => 0, 'filepath' => '/', 'filename' => 'media.elpx',
+        ], $zippath);
+
+        $items = (new package($file))->detect_gradable_idevices();
+
+        $this->assertCount(1, $items);
+        $leaked = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator(
+            get_request_storage_directory(),
+            \FilesystemIterator::SKIP_DOTS
+        ));
+        foreach ($leaked as $path) {
+            $this->assertNotSame('unextracted-media.bin', $path->getFilename());
+        }
+    }
+
+    /**
      * A corrupt (non-zip) package yields no gradable iDevices and does not throw.
      */
     public function test_corrupt_package_returns_empty(): void {

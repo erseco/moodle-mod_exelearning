@@ -24,13 +24,18 @@ use core_external\external_value;
 use core_external\external_warnings;
 use context_module;
 use core_user;
+use mod_exelearning\local\attempts;
 
 /**
  * External function: list a user's attempts on a mod_exelearning activity.
  *
  * Returns one entry per attempt (the overall itemnumber=0 row), with the overall
  * score percentage and status. A user may read their own attempts; reading another
- * user's attempts requires mod/exelearning:viewreport (mirrors mod_scorm).
+ * user's attempts requires mod/exelearning:viewreport (mirrors mod_scorm) and that the
+ * user is visible to the caller (enrolled, same group in separate groups mode). When
+ * reviewmode hides past attempts from the learner (never / not yet complete), a
+ * self-request returns an empty attempts list plus a 'reviewnotallowed' warning; the
+ * grademethod/maxattempt/usedattempts counters are still returned, as on view.php.
  *
  * @package    mod_exelearning
  * @copyright  2026 ATE (Área de Tecnología Educativa)
@@ -75,11 +80,29 @@ class get_user_attempts extends external_api {
         $user = core_user::get_user($targetuserid, '*', MUST_EXIST);
         core_user::require_active_user($user);
         if ($user->id != $USER->id) {
-            // Only staff may read another user's attempts.
+            // Only staff may read another user's attempts, and only of users they can
+            // see: enrolled and, in separate groups, in one of their groups (SEC-001).
             require_capability('mod/exelearning:viewreport', $context);
+            if (!attempts::can_view_user_data($cm, $context, (int) $user->id)) {
+                throw new \moodle_exception('usernotvisible', 'mod_exelearning');
+            }
         }
 
-        $rows = $DB->get_records(
+        // A learner reading their own history gets it only when reviewmode lets them
+        // see it on view.php (SEC-002). The counters stay: view.php shows them too.
+        $warnings = [];
+        $canreview = $user->id != $USER->id
+            || attempts::can_review($exelearning, $cm, $course, (int) $user->id);
+        if (!$canreview) {
+            $warnings[] = [
+                'item'        => 'exelearning',
+                'itemid'      => (int) $exelearning->id,
+                'warningcode' => 'reviewnotallowed',
+                'message'     => get_string('reviewnotallowed', 'mod_exelearning'),
+            ];
+        }
+
+        $rows = !$canreview ? [] : $DB->get_records(
             'exelearning_attempt',
             ['exelearningid' => $exelearning->id, 'userid' => $user->id, 'itemnumber' => 0],
             'attempt ASC'
@@ -104,11 +127,11 @@ class get_user_attempts extends external_api {
             // their history should show all of it — so a client cannot derive the cap
             // from count($attempts): ungraded-period attempts do not count against
             // maxattempt (DEC-124-03). Return the number the server actually enforces.
-            'usedattempts' => \mod_exelearning\local\attempts::count_user_attempts(
+            'usedattempts' => attempts::count_user_attempts(
                 (int) $exelearning->id,
                 (int) $user->id
             ),
-            'warnings'    => [],
+            'warnings'    => $warnings,
         ];
     }
 

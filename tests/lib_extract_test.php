@@ -27,7 +27,6 @@ use advanced_testcase;
  * @copyright  2026 ATE (Área de Tecnología Educativa)
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  * @covers     ::exelearning_extract_stored_package
- * @covers     ::exelearning_inject_scorm_loader
  * @covers     ::exelearning_get_stored_package
  * @covers     ::exelearning_package_has_content_xml
  * @covers     \mod_exelearning\local\package_manager
@@ -42,7 +41,7 @@ final class lib_extract_test extends advanced_testcase {
      * Creating an instance from the default ELPX fixture expands the package into
      * the content filearea, ships the SCORM wrapper shim and rewrites the HTML so
      * the wrapper loads at page-load time (exelearning_extract_stored_package() and
-     * exelearning_inject_scorm_loader()).
+     * \mod_exelearning\local\scorm\scorm_injector::inject()).
      */
     public function test_create_instance_extracts_package_and_injects_scorm_loader(): void {
         global $DB;

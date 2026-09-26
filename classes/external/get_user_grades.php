@@ -31,7 +31,9 @@ use core_user;
  * Reflects the real gradebook columns (the per-iDevice items in PERITEM mode, or the
  * overall item in OVERALL mode), enriched with each iDevice's type/name. A user may
  * read their own grades; reading another user's grades requires
- * mod/exelearning:viewreport.
+ * mod/exelearning:viewreport and that the user is visible to the caller (enrolled,
+ * same group in separate groups mode). Hidden grades are returned without a value
+ * unless the caller has moodle/grade:viewhidden.
  *
  * @package    mod_exelearning
  * @copyright  2026 ATE (Área de Tecnología Educativa)
@@ -78,7 +80,14 @@ class get_user_grades extends external_api {
         core_user::require_active_user($user);
         if ($user->id != $USER->id) {
             require_capability('mod/exelearning:viewreport', $context);
+            // Same visibility boundary as report.php (SEC-001).
+            if (!\mod_exelearning\local\attempts::can_view_user_data($cm, $context, (int) $user->id)) {
+                throw new \moodle_exception('usernotvisible', 'mod_exelearning');
+            }
         }
+        // Core grade_get_grades() returns hidden grades with only a 'hidden' flag, so honour
+        // it here as the user grade report does (SPEC-01).
+        $canviewhidden = has_capability('moodle/grade:viewhidden', \context_course::instance($course->id));
 
         // Per-iDevice metadata (type/name) keyed by itemnumber, to enrich columns.
         $meta = $DB->get_records(
@@ -94,6 +103,9 @@ class get_user_grades extends external_api {
             $itemnumber = (int) $itemnumber;
             $grademax = (float) $item->grademax;
             $value = $item->grades[$user->id]->grade ?? null;
+            if (!$canviewhidden && ($item->hidden || !empty($item->grades[$user->id]->hidden))) {
+                $value = null;
+            }
             $entry = [
                 'itemnumber'  => $itemnumber,
                 'name'        => isset($meta[$itemnumber]) ? (string) $meta[$itemnumber]->name : (string) $item->itemname,
