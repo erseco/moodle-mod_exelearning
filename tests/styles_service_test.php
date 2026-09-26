@@ -481,7 +481,7 @@ final class styles_service_test extends advanced_testcase {
      * Build a bundled editor whose layout matches the release ZIP: themes live
      * under files/perm/themes/base/ and data/ only ships bundle.json.zst.
      *
-     * @param array<string,string|null> $themes Directory name => config.xml (null for none).
+     * @param array $themes Map of theme directory name to config.xml contents (null writes no config.xml).
      * @return string The bundled editor directory.
      */
     private function make_bundled_editor(array $themes): string {
