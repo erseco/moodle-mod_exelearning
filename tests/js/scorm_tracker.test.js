@@ -620,6 +620,73 @@ describe('createScormApi: attempts start on learner interaction', () => {
         expect(xhr.calls).toHaveLength(0);
     });
 
+    it('starts the attempt on real learner input inside an iDevice', () => {
+        // jsdom cannot dispatch trusted events, so capture the listener the tracker
+        // registers and call it with the event a real pointer press would produce.
+        const listeners = {};
+        const spy = vi.spyOn(document, 'addEventListener').mockImplementation((type, fn) => {
+            listeners[type] = fn;
+        });
+        try {
+            const xhr = makeXhr(200);
+            const { api } = createScormApi(config(xhr));
+            seedOnLoad(api);
+            listeners.pointerdown({ isTrusted: true, target: document.getElementById('check') });
+            api.LMSSetValue('cmi.core.score.raw', '0');
+            scheduled();
+            expect(xhr.calls).toHaveLength(1);
+        } finally {
+            spy.mockRestore();
+        }
+    });
+
+    it('starts the attempt when focus moves into an iframe nested in an iDevice', () => {
+        vi.useFakeTimers();
+        const blur = [];
+        const spy = vi.spyOn(window, 'addEventListener').mockImplementation((type, fn) => {
+            if (type === 'blur') { blur.push(fn); }
+        });
+        try {
+            document.getElementById('ide-tf').innerHTML = '<iframe id="applet"></iframe>';
+            const xhr = makeXhr(200);
+            const { api } = createScormApi(config(xhr));
+            seedOnLoad(api);
+            // Clicking the applet moves focus to the nested iframe, which becomes the
+            // page's active element once the blur has settled.
+            document.getElementById('applet').focus();
+            blur.forEach((fn) => fn());
+            vi.runAllTimers();
+            api.LMSSetValue('cmi.core.score.raw', '0');
+            scheduled();
+            expect(xhr.calls).toHaveLength(1);
+        } finally {
+            spy.mockRestore();
+            vi.useRealTimers();
+        }
+    });
+
+    it('does not start the attempt when focus leaves the page outside an iDevice', () => {
+        vi.useFakeTimers();
+        const blur = [];
+        const spy = vi.spyOn(window, 'addEventListener').mockImplementation((type, fn) => {
+            if (type === 'blur') { blur.push(fn); }
+        });
+        try {
+            const xhr = makeXhr(200);
+            const { api } = createScormApi(config(xhr));
+            seedOnLoad(api);
+            document.getElementById('next').focus();
+            blur.forEach((fn) => fn());
+            vi.runAllTimers();
+            api.LMSSetValue('cmi.core.score.raw', '0');
+            expect(api.LMSFinish()).toBe('true');
+            expect(xhr.calls).toHaveLength(0);
+        } finally {
+            spy.mockRestore();
+            vi.useRealTimers();
+        }
+    });
+
     it('keeps committing normally once the attempt has started', () => {
         const xhr = makeXhr(200);
         const tracker = createScormApi(config(xhr));
