@@ -81,16 +81,9 @@ if ($showeditorbutton) {
 // when something is missing and runs under the package lock; null means no content.
 $mainfile = \mod_exelearning\local\package_manager::self_heal($context->id, $exelearning);
 
+// The activity header rendered by header() already shows the activity name and
+// description on every supported Moodle version, so they are not printed again.
 echo $OUTPUT->header();
-echo $OUTPUT->heading(format_string($exelearning->name));
-
-if (!empty($exelearning->intro)) {
-    echo $OUTPUT->box(
-        format_module_intro('exelearning', $exelearning, $cm->id),
-        'generalbox',
-        'intro'
-    );
-}
 
 // Preview mode banner + toggle links (DEC-0-06).
 if ($showpreviewtoggle) {
