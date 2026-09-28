@@ -51,11 +51,9 @@ define('EXELEARNING_COMPLETIONSTATUS_ANY', 3); // Require a passed OR completed 
  */
 function exelearning_supports($feature) {
     // Moodle 5.1+ only: a secondary purpose also lists the activity under
-    // assessment (DEC-159-01). Checked before the switch because evaluating the
+    // assessment (DEC-159-01). Resolved here, not as a switch case: evaluating the
     // undefined constant as a case would throw on 4.5 and 5.0.
-    if (defined('FEATURE_MOD_OTHERPURPOSE') && $feature === FEATURE_MOD_OTHERPURPOSE) {
-        return MOD_PURPOSE_ASSESSMENT;
-    }
+    $otherpurpose = defined('FEATURE_MOD_OTHERPURPOSE') ? constant('FEATURE_MOD_OTHERPURPOSE') : null;
     // No FEATURE_MOD_ARCHETYPE: the default (MOD_ARCHETYPE_OTHER) is what lists the
     // module under the chooser's "Activities" tab on 4.5 and 5.0 (DEC-159-01).
     switch ($feature) {
@@ -82,7 +80,7 @@ function exelearning_supports($feature) {
             // and Lesson (DEC-159-01, supersedes DEC-37-01).
             return MOD_PURPOSE_INTERACTIVECONTENT;
         default:
-            return null;
+            return ($otherpurpose !== null && $feature === $otherpurpose) ? MOD_PURPOSE_ASSESSMENT : null;
     }
 }
 
