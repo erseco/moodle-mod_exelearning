@@ -632,7 +632,9 @@ final class track_test extends advanced_testcase {
         $submit = function (string $session, array $itemscores) use ($instance, $course, $cm, $student): void {
             $result = track::ingest($instance, $course, $cm, $student->id, [
                 'session' => $session,
-                'cmi' => ['cmi.core.score.raw' => '50', 'cmi.core.score.max' => '100'],
+                // Raw matches the overall recomputed from the one scored iDevice, so
+                // ingest() does not report a divergence (DEC-6-01).
+                'cmi' => ['cmi.core.score.raw' => '100', 'cmi.core.score.max' => '100'],
                 'itemscores' => $itemscores,
             ], false);
             $this->assertTrue($result['ok']);
