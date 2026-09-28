@@ -50,6 +50,12 @@ define('EXELEARNING_COMPLETIONSTATUS_ANY', 3); // Require a passed OR completed 
  * @return mixed
  */
 function exelearning_supports($feature) {
+    // Moodle 5.1+ only: a secondary purpose also lists the activity under
+    // assessment (DEC-2454-01). Checked before the switch because evaluating the
+    // undefined constant as a case would throw on 4.5 and 5.0.
+    if (defined('FEATURE_MOD_OTHERPURPOSE') && $feature === FEATURE_MOD_OTHERPURPOSE) {
+        return MOD_PURPOSE_ASSESSMENT;
+    }
     switch ($feature) {
         case FEATURE_MOD_ARCHETYPE:
             return MOD_ARCHETYPE_ASSIGNMENT;
@@ -72,7 +78,9 @@ function exelearning_supports($feature) {
         case FEATURE_SHOW_DESCRIPTION:
             return true;
         case FEATURE_MOD_PURPOSE:
-            return MOD_PURPOSE_ASSESSMENT;
+            // Interactive content that may carry graded iDevices, like SCORM, H5P
+            // and Lesson (DEC-2454-01, supersedes DEC-37-01).
+            return MOD_PURPOSE_INTERACTIVECONTENT;
         default:
             return null;
     }
@@ -82,8 +90,7 @@ function exelearning_supports($feature) {
  * Whether the activity icon is branded.
  *
  * Branded icons keep their own colours: Moodle skips the purpose colour filter
- * that would otherwise tint the monologo pink for MOD_PURPOSE_ASSESSMENT
- * (exelearning/exelearning issue 2453). The purpose itself stays unchanged.
+ * that would otherwise tint the monologo (exelearning/exelearning issue 2453).
  *
  * @return bool Always true, so pix/monologo.svg renders in the official colour.
  */
