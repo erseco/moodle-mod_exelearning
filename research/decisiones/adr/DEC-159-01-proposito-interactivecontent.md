@@ -1,9 +1,9 @@
 ---
-id: DEC-2454-01
+id: DEC-159-01
 title: "Propósito del módulo: MOD_PURPOSE_INTERACTIVECONTENT como primario y ASSESSMENT como secundario"
 status: Accepted
 date: 2026-09-28
-tracking_issue: 2454
+tracking_issue: 159
 supersedes: [DEC-37-01]
 deciders:
   - erseco
@@ -17,7 +17,7 @@ ai_assistance:
   model: claude-opus-5-5
 ---
 
-# DEC-2454-01: Propósito del módulo: MOD_PURPOSE_INTERACTIVECONTENT como primario y ASSESSMENT como secundario
+# DEC-159-01: Propósito del módulo: MOD_PURPOSE_INTERACTIVECONTENT como primario y ASSESSMENT como secundario
 
 ## Contexto
 
@@ -26,8 +26,9 @@ No valoró `MOD_PURPOSE_INTERACTIVECONTENT`, que es el propósito que core usa p
 módulos más parecidos. Como efecto secundario, el propósito teñía el icono de rosa
 (exelearning/exelearning issue 2453); `exelearning_is_branded()` ya lo evita, así que el
 propósito solo decide dónde aparece la actividad en el selector y en su filtro por
-propósito. El número de seguimiento es el issue 2454 del repositorio
-`exelearning/exelearning`, donde se centralizan los issues del plugin.
+propósito. La propuesta es el issue exelearning/exelearning#2454 (los issues del plugin
+se centralizan allí); como no hay issue en este repositorio, el ADR usa el número del
+PR 159.
 
 ## Evidencia
 

@@ -106,7 +106,7 @@ interactive content (`mod_h5pactivity`, `mod_lesson`). The purpose only places t
 activity in the chooser: the icon is branded (`exelearning_is_branded()`), so it is
 never tinted. These are resolved per **module type**, not per instance, so they do
 not vary with the per-activity `gradeenabled` switch ([[DEC-13-07]]). Decision
-recorded in [[DEC-2454-01]], which supersedes [[DEC-37-01]].
+recorded in [[DEC-159-01]], which supersedes [[DEC-37-01]].
 
 ## Global search
 

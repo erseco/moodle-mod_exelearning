@@ -51,13 +51,13 @@ define('EXELEARNING_COMPLETIONSTATUS_ANY', 3); // Require a passed OR completed 
  */
 function exelearning_supports($feature) {
     // Moodle 5.1+ only: a secondary purpose also lists the activity under
-    // assessment (DEC-2454-01). Checked before the switch because evaluating the
+    // assessment (DEC-159-01). Checked before the switch because evaluating the
     // undefined constant as a case would throw on 4.5 and 5.0.
     if (defined('FEATURE_MOD_OTHERPURPOSE') && $feature === FEATURE_MOD_OTHERPURPOSE) {
         return MOD_PURPOSE_ASSESSMENT;
     }
     // No FEATURE_MOD_ARCHETYPE: the default (MOD_ARCHETYPE_OTHER) is what lists the
-    // module under the chooser's "Activities" tab on 4.5 and 5.0 (DEC-2454-01).
+    // module under the chooser's "Activities" tab on 4.5 and 5.0 (DEC-159-01).
     switch ($feature) {
         case FEATURE_GROUPS:
             return true;
@@ -79,7 +79,7 @@ function exelearning_supports($feature) {
             return true;
         case FEATURE_MOD_PURPOSE:
             // Interactive content that may carry graded iDevices, like SCORM, H5P
-            // and Lesson (DEC-2454-01, supersedes DEC-37-01).
+            // and Lesson (DEC-159-01, supersedes DEC-37-01).
             return MOD_PURPOSE_INTERACTIVECONTENT;
         default:
             return null;

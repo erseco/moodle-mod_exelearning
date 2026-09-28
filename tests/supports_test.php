@@ -36,7 +36,7 @@ require_once($CFG->dirroot . '/mod/exelearning/lib.php');
  */
 final class supports_test extends advanced_testcase {
     /**
-     * DEC-2454-01: the module is interactive content (like SCORM, H5P and Lesson)
+     * DEC-159-01: the module is interactive content (like SCORM, H5P and Lesson)
      * that may carry graded iDevices. The classification is fixed per module type
      * and must not silently change.
      */
@@ -57,7 +57,7 @@ final class supports_test extends advanced_testcase {
     }
 
     /**
-     * DEC-2454-01: on Moodle 5.1+ the module is also listed under assessment, as a
+     * DEC-159-01: on Moodle 5.1+ the module is also listed under assessment, as a
      * secondary purpose. Older branches do not define the feature at all.
      */
     public function test_supports_reports_assessment_as_secondary_purpose(): void {
