@@ -97,7 +97,8 @@ is **not** debt.
 
 ## Functional classification
 
-`exelearning_supports()` declares `MOD_ARCHETYPE_ASSIGNMENT` with
+`exelearning_supports()` keeps the default archetype (`MOD_ARCHETYPE_OTHER`, which the
+4.5 and 5.0 activity chooser needs to list the module under "Activities") and declares
 `MOD_PURPOSE_INTERACTIVECONTENT` as primary purpose and, on Moodle 5.1+,
 `MOD_PURPOSE_ASSESSMENT` as secondary purpose (`FEATURE_MOD_OTHERPURPOSE`, guarded
 with `defined()` because 4.5 and 5.0 lack it). This matches core's own modules for

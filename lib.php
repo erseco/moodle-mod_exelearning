@@ -56,9 +56,9 @@ function exelearning_supports($feature) {
     if (defined('FEATURE_MOD_OTHERPURPOSE') && $feature === FEATURE_MOD_OTHERPURPOSE) {
         return MOD_PURPOSE_ASSESSMENT;
     }
+    // No FEATURE_MOD_ARCHETYPE: the default (MOD_ARCHETYPE_OTHER) is what lists the
+    // module under the chooser's "Activities" tab on 4.5 and 5.0 (DEC-2454-01).
     switch ($feature) {
-        case FEATURE_MOD_ARCHETYPE:
-            return MOD_ARCHETYPE_ASSIGNMENT;
         case FEATURE_GROUPS:
             return true;
         case FEATURE_GROUPINGS:

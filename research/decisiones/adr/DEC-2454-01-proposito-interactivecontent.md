@@ -55,19 +55,25 @@ Consultado en `moodle/moodle` el 2026-09-28 (`gh api repos/moodle/moodle/content
 - `FEATURE_MOD_OTHERPURPOSE` se comprueba con `defined()` antes del `switch` de
   `exelearning_supports()`. Evaluar la constante como `case` lanzaría un `Error` en 4.5
   y 5.0 para cualquier feature no reconocida.
-- Se mantiene `MOD_ARCHETYPE_ASSIGNMENT`. Cambiarlo no lo pide el issue y afecta a
-  valores por defecto (grupos, finalización) que `DEC-37-01` justificó; queda como
-  pregunta abierta separada.
+- Se retira `MOD_ARCHETYPE_ASSIGNMENT` y el módulo usa el archetype por defecto
+  (`MOD_ARCHETYPE_OTHER`), como SCORM, H5P, Lesson y la propia Tarea. En 4.5 y 5.0 el
+  selector reparte las pestañas por archetype: `course/amd/src/activitychooser.js:261-262`
+  (imagen `erseco/alpine-moodle:v5.0.7`) filtra "Actividades" con `archetype === 0` y
+  "Recursos" con `archetype === 1`. Con el valor 2 el módulo solo salía en "Todos".
+  Core no usa `MOD_ARCHETYPE_ASSIGNMENT` en ningún otro sitio (solo lo define en
+  `lib/moodlelib.php:481`), así que los valores por defecto de grupos y finalización
+  que citaba `DEC-37-01` vienen de sus propias features, no del archetype.
 
 ## Consecuencias
 
 - **Positivas:** la actividad aparece junto a SCORM y H5P, que es donde la buscan los
-  docentes; sigue la taxonomía de core; en 5.1+ también aparece bajo evaluación.
+  docentes; en 4.5 y 5.0 vuelve a salir en la pestaña "Actividades"; sigue la taxonomía
+  de core; en 5.1+ también aparece bajo evaluación.
 - **Negativas:** en 4.5 y 5.0 solo aparece como contenido interactivo. En sitios
   existentes la actividad cambia de categoría en el selector.
 - **Sin riesgo visual:** el icono es de marca y no se tiñe.
 
 ## Validación
 
-`tests/supports_test.php` fija el propósito primario y, cuando la constante existe, el
+`tests/supports_test.php` fija el archetype por defecto, el propósito primario y, cuando la constante existe, el
 secundario (en 4.5 y 5.0 ese caso se omite). La matriz de CI cubre 4.5–5.2.

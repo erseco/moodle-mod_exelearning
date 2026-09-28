@@ -41,7 +41,9 @@ final class supports_test extends advanced_testcase {
      * and must not silently change.
      */
     public function test_supports_reports_interactive_content_classification(): void {
-        $this->assertSame(MOD_ARCHETYPE_ASSIGNMENT, exelearning_supports(FEATURE_MOD_ARCHETYPE));
+        // Default archetype: 4.5 and 5.0 list only MOD_ARCHETYPE_OTHER under "Activities".
+        $this->assertNull(exelearning_supports(FEATURE_MOD_ARCHETYPE));
+        $this->assertSame(MOD_ARCHETYPE_OTHER, plugin_supports('mod', 'exelearning', FEATURE_MOD_ARCHETYPE, MOD_ARCHETYPE_OTHER));
         $this->assertSame(MOD_PURPOSE_INTERACTIVECONTENT, exelearning_supports(FEATURE_MOD_PURPOSE));
         $this->assertTrue(exelearning_supports(FEATURE_GRADE_HAS_GRADE));
         $this->assertTrue(exelearning_supports(FEATURE_BACKUP_MOODLE2));
