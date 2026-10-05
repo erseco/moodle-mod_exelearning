@@ -29,11 +29,14 @@ use advanced_testcase;
  */
 final class serving_test extends advanced_testcase {
     /**
-     * The emitted CSP MUST be byte-identical to eXe core previewCspHeader():
-     * a single line, directives joined by "; ", no trailing ";", sandbox first.
+     * The emitted CSP MUST keep eXe core previewCspHeader()'s exact shape: a single
+     * line, directives joined by "; ", no trailing ";", sandbox first. The sandbox adds
+     * allow-downloads, which the bundled editor's preview iframe attribute already
+     * grants, and worker-src allows blob:, so the previewed package's downloads
+     * (the fflate-compressed "Download .elpx") are neither dropped nor stalled.
      */
     public function test_csp_header_is_byte_identical_to_core(): void {
-        $expected = "sandbox allow-scripts allow-popups allow-forms; "
+        $expected = "sandbox allow-scripts allow-popups allow-forms allow-downloads; "
             . "default-src 'self'; "
             . "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
             . "style-src 'self' 'unsafe-inline'; "
@@ -41,6 +44,7 @@ final class serving_test extends advanced_testcase {
             . "media-src 'self' data: blob: https:; "
             . "font-src 'self' data:; "
             . "connect-src 'self'; "
+            . "worker-src 'self' blob:; "
             . "frame-src 'self' https://www.youtube-nocookie.com https://player.vimeo.com; "
             . "child-src 'self' https://www.youtube-nocookie.com https://player.vimeo.com; "
             . "object-src 'none'; "

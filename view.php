@@ -535,7 +535,9 @@ if (!$mainfile) {
     // security mode (\mod_exelearning\local\ui\player_iframe, DEC-80-01). Both modes
     // omit allow-top-navigation (a package must not change the parent URL) and
     // allow-modals; secure mode also omits allow-same-origin (opaque origin, so the
-    // package cannot reach this page) and allow-popups-to-escape-sandbox.
+    // package cannot reach this page) and allow-popups-to-escape-sandbox. Both modes
+    // grant allow-downloads so <a download> links and the download-source-file
+    // iDevice's "Download .elpx" button work (exelearning/exelearning#2488).
     echo html_writer::tag('iframe', '', [
         'src'    => $iframeurl->out(false),
         'name'   => 'exelearningobject',

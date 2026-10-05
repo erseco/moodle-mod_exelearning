@@ -24,7 +24,7 @@ namespace mod_exelearning\local\preview;
  * byte-identical to core so the two can never drift:
  *
  * - the sandbox-first Content-Security-Policy ({@see self::csp_header()},
- *   byte-identical to previewCspHeader());
+ *   previewCspHeader() plus allow-downloads and blob: workers for package downloads);
  * - traversal-safe path normalization and MIME/charset resolution
  *   ({@see self::normalize_content_path()}, {@see self::content_type_for()});
  * - the tiered serving response (scriptable documents no-store, everything else
@@ -86,19 +86,26 @@ class serving {
     ];
 
     /**
-     * The sandbox-first preview CSP. MUST stay byte-identical to eXe core
-     * previewCspHeader() (src/shared/security/previewSandbox.ts): a single line,
-     * directives joined by "; ", no trailing ";". The sandbox tokens are hardcoded
-     * to allow-scripts allow-popups allow-forms (== PREVIEW_SANDBOX): the preview
-     * is ALWAYS opaque and must NOT inherit the published-content escape hatch
-     * (player_iframe::sandbox_tokens() can add allow-same-origin under the dev-only
-     * legacy hatch, which would defeat opacity — never reuse it here).
+     * The sandbox-first preview CSP. Same shape as eXe core previewCspHeader()
+     * (src/shared/security/previewSandbox.ts): a single line, directives joined by
+     * "; ", no trailing ";". The sandbox tokens are hardcoded to allow-scripts
+     * allow-popups allow-forms allow-downloads: the preview is ALWAYS opaque and must
+     * NOT inherit the published-content escape hatch (player_iframe::sandbox_tokens()
+     * can add allow-same-origin under the dev-only legacy hatch, which would defeat
+     * opacity — never reuse it here). allow-downloads lets the previewed package's
+     * <a download> links and "Download .elpx" button work (exelearning/exelearning#2488):
+     * a framed document's effective sandbox is the intersection of this directive and
+     * the iframe attribute, and the bundled editor's preview iframe already grants it
+     * (EMBEDDED_PREVIEW_SANDBOX). It gives the opaque frame no access to the editor.
+     * worker-src allows blob: because that button compresses with fflate in blob:
+     * workers; without it workers fall back to child-src, are blocked, and the bundled
+     * editor (before exelearning/exelearning#2489) hangs at "Processing... 100%".
      *
      * @return string
      */
     public static function csp_header(): string {
         return implode('; ', [
-            'sandbox allow-scripts allow-popups allow-forms',
+            'sandbox allow-scripts allow-popups allow-forms allow-downloads',
             "default-src 'self'",
             "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
             "style-src 'self' 'unsafe-inline'",
@@ -106,6 +113,7 @@ class serving {
             "media-src 'self' data: blob: https:",
             "font-src 'self' data:",
             "connect-src 'self'",
+            "worker-src 'self' blob:",
             "frame-src 'self' https://www.youtube-nocookie.com https://player.vimeo.com",
             "child-src 'self' https://www.youtube-nocookie.com https://player.vimeo.com",
             "object-src 'none'",

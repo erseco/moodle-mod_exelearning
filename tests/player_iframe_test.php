@@ -80,6 +80,7 @@ final class player_iframe_test extends advanced_testcase {
             $this->assertSame(player_iframe::MODE_LEGACY, player_iframe::resolve_mode());
             $this->assertFalse(player_iframe::is_secure());
             $this->assertStringContainsString('allow-same-origin', player_iframe::sandbox_tokens());
+            $this->assertStringContainsString('allow-downloads', player_iframe::sandbox_tokens());
             $csp = player_iframe::content_security_policy('https://moodle.example.net');
             $this->assertStringNotContainsString('sandbox', $csp);
         } finally {
@@ -90,7 +91,8 @@ final class player_iframe_test extends advanced_testcase {
     /**
      * The package always runs in an opaque origin: the sandbox tokens MUST drop
      * allow-same-origin and allow-popups-to-escape-sandbox, keep the scripts/popups/forms
-     * the iDevices need, and never grant top navigation or modals.
+     * the iDevices need plus allow-downloads (without it the browser drops the package's
+     * downloads, e.g. the "Download .elpx" button), and never grant top navigation or modals.
      */
     public function test_secure_sandbox_tokens(): void {
         $tokens = player_iframe::sandbox_tokens();
@@ -99,6 +101,7 @@ final class player_iframe_test extends advanced_testcase {
         $this->assertContains('allow-scripts', $list);
         $this->assertContains('allow-popups', $list);
         $this->assertContains('allow-forms', $list);
+        $this->assertContains('allow-downloads', $list);
 
         $this->assertNotContains('allow-same-origin', $list);
         $this->assertNotContains('allow-popups-to-escape-sandbox', $list);
@@ -133,8 +136,12 @@ final class player_iframe_test extends advanced_testcase {
         $this->assertStringContainsString("frame-ancestors 'self'", $csp);
         // A sandbox directive keeps the document opaque even when opened outside the
         // iframe (e.g. the token URL opened in a new tab), so author JS cannot run as
-        // Moodle's origin. Tokens mirror the secure iframe sandbox.
-        $this->assertStringContainsString('sandbox allow-scripts allow-popups allow-forms', $csp);
+        // Moodle's origin. Tokens mirror the secure iframe sandbox, allow-downloads included
+        // (a CSP sandbox applies to the document itself).
+        $this->assertStringContainsString('; sandbox ' . player_iframe::sandbox_tokens(), $csp);
+        $this->assertStringContainsString('allow-downloads', $csp);
+        // The download-source-file iDevice compresses in blob: workers (fflate).
+        $this->assertStringContainsString("worker-src 'self' $origin blob:;", $csp);
         $this->assertStringContainsString("connect-src 'self' $origin;", $csp);
         // Inline + eval'd scripts are required by the eXeLearning engine.
         $this->assertStringContainsString("'unsafe-inline'", $csp);
@@ -189,7 +196,8 @@ final class player_iframe_test extends advanced_testcase {
         $csp = player_iframe::content_security_policy($origin, player_iframe::CSP_COMPATIBLE);
         $this->assertMatchesRegularExpression('~img-src[^;]*\bhttps:(?!//)~', $csp);
         $this->assertMatchesRegularExpression('~media-src[^;]*\bhttps:(?!//)~', $csp);
-        $this->assertStringContainsString('sandbox allow-scripts allow-popups allow-forms', $csp);
+        $this->assertStringContainsString('sandbox allow-scripts allow-popups allow-forms allow-downloads', $csp);
+        $this->assertStringContainsString("worker-src 'self' $origin blob:;", $csp);
     }
 
     /**

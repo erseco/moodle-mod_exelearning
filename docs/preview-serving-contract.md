@@ -89,10 +89,10 @@ sandbox-first CSP **verbatim**:
 
 ```
 Content-Security-Policy:
-  sandbox allow-scripts allow-popups allow-forms; default-src 'self';
+  sandbox allow-scripts allow-popups allow-forms allow-downloads; default-src 'self';
   script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline';
   img-src 'self' data: blob: https:; media-src 'self' data: blob: https:;
-  font-src 'self' data:; connect-src 'self';
+  font-src 'self' data:; connect-src 'self'; worker-src 'self' blob:;
   frame-src 'self' https://www.youtube-nocookie.com https://player.vimeo.com;
   child-src 'self' https://www.youtube-nocookie.com https://player.vimeo.com;
   object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'self';
@@ -102,8 +102,15 @@ Not just HTML: an author-supplied SVG runs its inline `<script>` when opened
 top-level, and `nosniff` does not help — SVG is already a scriptable type.
 
 `serving::csp_header()` emits this as a single line joined by `; ` with no
-trailing `;` — **byte-identical** to core `previewCspHeader()`
+trailing `;`, in the same shape as core `previewCspHeader()`
 (`serving_test::test_csp_header_is_byte_identical_to_core` is the drift check).
+Two additions keep the previewed package's downloads working: `allow-downloads`
+(the bundled editor's preview iframe attribute already grants it, and a framed
+document's effective sandbox is the intersection of attribute and CSP, so without
+it the browser drops `<a download>` links and the download-source-file iDevice's
+"Download .elpx" button, exelearning/exelearning#2488), and `worker-src 'self' blob:`
+(that button compresses with fflate in `blob:` workers; editors before
+exelearning/exelearning#2489 otherwise hang at "Processing... 100%").
 
 > **The preview is always opaque.** The preview CSP hardcodes its sandbox tokens
 > and does **not** reuse `player_iframe::sandbox_tokens()`: that helper can add

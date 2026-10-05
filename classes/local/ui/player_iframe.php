@@ -136,15 +136,24 @@ final class player_iframe {
      * eXeLearning v4 iDevices need jQuery + scripts, popups (interactive-video, hidden-image)
      * and forms (quick-questions, form, scrambled-list). See ADR DEC-80-01 / DEC-0-16 / AN-008.
      *
+     * allow-downloads is kept too: without it the browser silently drops every download the
+     * frame starts, i.e. <a download> links and the download-source-file iDevice's
+     * "Download .elpx" button, which rebuilds the package in the browser
+     * (exelearning/exelearning#2488). It is safe in the opaque frame: it only lets the frame
+     * hand a file to the browser's download UI, grants no access to the parent page or to
+     * same-origin cookies/storage, and browsers still gate a sandboxed frame's downloads on
+     * user activation. It is appended last so the scripts/popups/forms prefix the embed-sync
+     * check pins (tools/check-embed-sync.mjs) is unchanged.
+     *
      * @return string Space-separated sandbox token list.
      */
     public static function sandbox_tokens(): string {
         if (!self::is_secure()) {
             // Dev-only escape hatch: same-origin so a service worker that only serves same-origin
             // documents (the php-wasm Playground) can load the package CSS/JS. Never used in production.
-            return 'allow-same-origin allow-scripts allow-popups allow-forms';
+            return 'allow-same-origin allow-scripts allow-popups allow-forms allow-downloads';
         }
-        return 'allow-scripts allow-popups allow-forms';
+        return 'allow-scripts allow-popups allow-forms allow-downloads';
     }
 
     /**
@@ -216,7 +225,11 @@ final class player_iframe {
      * to the maintained providers. Compatible re-opens img/media/script (and frame-src) to
      * https: for content with external author images or a MathJax CDN — documented weaker.
      * The CSP-level `sandbox` keeps the document opaque even if the token URL is opened
-     * outside the iframe (a new tab), mirroring the iframe sandbox tokens.
+     * outside the iframe (a new tab), mirroring the iframe sandbox tokens (sandbox_tokens(),
+     * so the two cannot drift and allow-downloads applies to the document itself). worker-src
+     * allows blob: because the download-source-file iDevice compresses the rebuilt `.elpx`
+     * with fflate in blob: workers; without it the worker falls back to script-src, is blocked,
+     * and packages exported before exelearning/exelearning#2489 hang at "Processing... 100%".
      *
      * @param string $siteorigin The scheme://host[:port] origin of this Moodle site.
      * @param string|null $profile self::CSP_STRICT/CSP_COMPATIBLE, or null to use csp_profile().
@@ -246,6 +259,7 @@ final class player_iframe {
             . $mediasrc
             . "font-src 'self' $siteorigin data:; "
             . "connect-src 'self' $siteorigin; "
+            . "worker-src 'self' $siteorigin blob:; "
             . $framesrc
             . "object-src 'none'; base-uri 'none'; form-action 'self' $siteorigin; "
             . "frame-ancestors 'self'";
@@ -253,7 +267,7 @@ final class player_iframe {
         // iframe. Omit it under the dev-only legacy escape hatch (the php-wasm Playground), which
         // needs same-origin rendering; the iframe sandbox attribute is relaxed in lockstep.
         if (self::is_secure()) {
-            $policy .= "; sandbox allow-scripts allow-popups allow-forms";
+            $policy .= '; sandbox ' . self::sandbox_tokens();
         }
         return $policy;
     }
