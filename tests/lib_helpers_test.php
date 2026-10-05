@@ -35,6 +35,7 @@ require_once($CFG->dirroot . '/mod/exelearning/lib.php');
  * @covers     ::exelearning_grade_analysis_url
  * @covers     ::exelearning_embedded_editor_enabled
  * @covers     ::exelearning_require_embedded_editor_enabled
+ * @covers     ::exelearning_lms_export_warning
  * @covers     ::exelearning_get_embedded_editor_index_source
  * @covers     ::exelearning_get_embedded_editor_local_static_dir
  * @covers     \mod_exelearning\local\urls
@@ -172,5 +173,45 @@ final class lib_helpers_test extends advanced_testcase {
         $this->assertFalse(exelearning_embedded_editor_enabled());
         $this->expectException(\moodle_exception::class);
         exelearning_require_embedded_editor_enabled();
+    }
+
+    /**
+     * The SCORM/IMS-export warning (exelearning issue 2477) follows the "Edit with
+     * eXeLearning" button: a teacher with the editor gets it with the real button
+     * labels; a student, a disabled editor or a website package get nothing.
+     */
+    public function test_lms_export_warning_follows_editor_button(): void {
+        global $CFG, $DB;
+        $this->resetAfterTest();
+        $this->setAdminUser();
+
+        $dir = make_temp_directory('mod_exelearning/lw-' . random_string(6)) . '/static';
+        make_writable_directory($dir . '/app');
+        file_put_contents($dir . '/index.html', 'x');
+        $CFG->mod_exelearning_bundled_editor_dir = $dir;
+
+        $course = $this->getDataGenerator()->create_course();
+        $generator = $this->getDataGenerator()->get_plugin_generator('mod_exelearning');
+        $export = $generator->create_instance([
+            'course' => $course->id,
+            'packagefilepath' => 'research/fixtures/scorm/actividad-evaluable_scorm.zip',
+        ]);
+        $export = $DB->get_record('exelearning', ['id' => $export->id]);
+        $exportcontext = \context_module::instance(get_coursemodule_from_instance('exelearning', $export->id)->id);
+        $website = $DB->get_record('exelearning', ['id' => $generator->create_instance(['course' => $course->id])->id]);
+        $websitecontext = \context_module::instance(get_coursemodule_from_instance('exelearning', $website->id)->id);
+
+        $warning = exelearning_lms_export_warning($export, $exportcontext);
+        $this->assertStringContainsString(get_string('editwitheditor', 'mod_exelearning'), $warning);
+        $this->assertStringContainsString(get_string('savetomoodle', 'mod_exelearning'), $warning);
+        $this->assertNull(exelearning_lms_export_warning($website, $websitecontext));
+
+        $student = $this->getDataGenerator()->create_and_enrol($course, 'student');
+        $this->setUser($student);
+        $this->assertNull(exelearning_lms_export_warning($export, $exportcontext));
+
+        $this->setAdminUser();
+        set_config('editordisabled', 1, 'exelearning');
+        $this->assertNull(exelearning_lms_export_warning($export, $exportcontext));
     }
 }
