@@ -75,10 +75,14 @@ persists**: `ingest()` returns before any gradebook write
 - **An attempt starts when the learner answers.** The package's runtime seeds every
   gradable iDevice with a score of 0 as soon as a page loads, which is byte-identical
   to a real answer worth 0. The tracker therefore sends nothing until a score is
-  written after a trusted pointer or keyboard interaction inside an iDevice of that
-  same page (`js/scorm_tracker.js`, exelearning issue 2458). Opening or reviewing the
-  activity creates no attempt, consumes no allowed attempt and changes no grade; a
-  submitted 0 is still recorded like any other score.
+  written after a trusted interaction inside an iDevice of that same page
+  (`js/scorm_tracker.js`, exelearning issue 2458): pointer, touch, key, click (the
+  only event assistive technology sends) or input/change (dictation). Events a script
+  dispatches are not trusted and never count. A window blur counts only when focus
+  moved into an iframe, object or embed inside an iDevice (a click on a nested applet
+  never reaches the page); switching tabs with an iDevice field focused does not.
+  Opening or reviewing the activity creates no attempt, consumes no allowed attempt
+  and changes no grade; a submitted 0 is still recorded like any other score.
 - **Only the iDevices the learner touched are sent.** Once the attempt has started,
   the seed of every other gradable iDevice on the page is still in `cmi.suspend_data`.
   The tracker records which `.idevice_node` each interaction landed in and posts

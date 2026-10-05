@@ -46,6 +46,8 @@
     /** CMI keys that carry a result: writing one commits, and starts the attempt. */
     var SCORE_KEYS = ['cmi.suspend_data', 'cmi.core.score.raw', 'cmi.core.lesson_status',
         'cmi.score.raw', 'cmi.completion_status', 'cmi.success_status'];
+    /** Elements that take focus away from the package page into a nested document. */
+    var EMBED_TAGS = ['IFRAME', 'OBJECT', 'EMBED'];
 
     /**
      * Coerce a payload field to a finite number.
@@ -437,7 +439,9 @@
         // seeds its own iDevices on load, so only an interaction on the page whose
         // score is being written can start the attempt.
         var interactedDoc = null;
-        var watchedDocs = [];
+        // Package pages already listened to. Weak, so a visited page's document can be
+        // garbage-collected once the iframe moves on.
+        var watchedDocs = new WeakSet();
         // The iDevices (by objectid) the learner interacted with during this visit.
         // The runtime seeds every gradable iDevice on the page with 0, and that seed
         // stays in suspend_data, so only touched iDevices are sent (exelearning
@@ -471,23 +475,33 @@
             // Keep watching after the attempt starts: later pages still need to know
             // which of their iDevices the learner touched.
             if (!awaitInteraction || !doc || typeof doc.addEventListener !== 'function'
-                    || watchedDocs.indexOf(doc) !== -1) {
+                    || watchedDocs.has(doc)) {
                 return;
             }
-            watchedDocs.push(doc);
+            watchedDocs.add(doc);
             var onInput = function (event) {
-                // Only real input counts: scripts dispatching events do not answer.
+                // Only real input counts: scripts dispatching events (jQuery .trigger(),
+                // el.click()) do not answer.
                 if (event.isTrusted) { noteInteraction(event.target); }
             };
-            ['pointerdown', 'touchstart', 'keydown'].forEach(function (type) {
+            // Assistive technology activates controls with a bare click (screen reader
+            // browse mode, voice and switch control) and dictation fills fields with
+            // input/change, none of them preceded by a pointer or key event.
+            ['pointerdown', 'touchstart', 'keydown', 'click', 'input', 'change'].forEach(function (type) {
                 doc.addEventListener(type, onInput, true);
             });
             // A click inside an iframe nested in an iDevice (an applet, a video) never
-            // reaches this document; the page's window loses focus to it instead.
+            // reaches this document; the page's window loses focus to it instead. Any
+            // other loss of focus (switching tabs, clicking the Moodle page) is not an
+            // answer, even with a field inside an iDevice still focused.
             var win = doc.defaultView;
-            if (win && typeof win.addEventListener === 'function') {
+            if (win && typeof win.addEventListener === 'function' && setTimeoutFn) {
                 win.addEventListener('blur', function () {
-                    setTimeout(function () { noteInteraction(doc.activeElement); }, 0);
+                    // The active element settles on the nested frame after the blur.
+                    setTimeoutFn(function () {
+                        var el = doc.activeElement;
+                        if (el && EMBED_TAGS.indexOf(el.tagName) !== -1) { noteInteraction(el); }
+                    }, 0);
                 });
             }
         }
