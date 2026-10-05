@@ -620,13 +620,20 @@ describe('createScormApi: attempts start on learner interaction', () => {
         expect(xhr.calls).toHaveLength(0);
     });
 
-    it('starts the attempt on real learner input inside an iDevice', () => {
-        // jsdom cannot dispatch trusted events, so capture the listener the tracker
-        // registers and call it with the event a real pointer press would produce.
+    /**
+     * Capture the listeners the tracker registers on the document: the DOM cannot
+     * dispatch trusted events, so tests call them with the event real input produces.
+     */
+    function captureDocumentListeners() {
         const listeners = {};
         const spy = vi.spyOn(document, 'addEventListener').mockImplementation((type, fn) => {
             listeners[type] = fn;
         });
+        return { listeners, spy };
+    }
+
+    it('starts the attempt on real learner input inside an iDevice', () => {
+        const { listeners, spy } = captureDocumentListeners();
         try {
             const xhr = makeXhr(200);
             const { api } = createScormApi(config(xhr));
@@ -640,8 +647,60 @@ describe('createScormApi: attempts start on learner interaction', () => {
         }
     });
 
-    it('starts the attempt when focus moves into an iframe nested in an iDevice', () => {
-        vi.useFakeTimers();
+    it('starts the attempt on a bare trusted click (assistive technology)', () => {
+        // Screen reader browse mode, voice and switch control activate a control with a
+        // click that no pointerdown or keydown precedes.
+        const { listeners, spy } = captureDocumentListeners();
+        try {
+            const xhr = makeXhr(200);
+            const { api } = createScormApi(config(xhr));
+            seedOnLoad(api);
+            listeners.click({ isTrusted: true, target: document.getElementById('check') });
+            api.LMSSetValue('cmi.core.score.raw', '0');
+            scheduled();
+            expect(xhr.calls).toHaveLength(1);
+        } finally {
+            spy.mockRestore();
+        }
+    });
+
+    it('starts the attempt on dictated text (trusted input without a key press)', () => {
+        document.getElementById('ide-tf').innerHTML = '<input id="answer">';
+        const { listeners, spy } = captureDocumentListeners();
+        try {
+            const xhr = makeXhr(200);
+            const { api } = createScormApi(config(xhr));
+            seedOnLoad(api);
+            listeners.input({ isTrusted: true, target: document.getElementById('answer') });
+            api.LMSSetValue('cmi.core.score.raw', '0');
+            scheduled();
+            expect(xhr.calls).toHaveLength(1);
+        } finally {
+            spy.mockRestore();
+        }
+    });
+
+    it('ignores a click the runtime synthesises (el.click(), jQuery .trigger())', () => {
+        const xhr = makeXhr(200);
+        const { api } = createScormApi(config(xhr));
+        seedOnLoad(api);
+        document.getElementById('check').click();
+        api.LMSSetValue('cmi.core.score.raw', '0');
+        expect(api.LMSFinish()).toBe('true');
+        expect(xhr.calls).toHaveLength(0);
+    });
+
+    /**
+     * Fire the captured window blur listeners, run the tracker's deferred focus check
+     * through the injected timer, then let any other pending timer settle too.
+     */
+    async function blurWindow(blur) {
+        blur.forEach((fn) => fn());
+        scheduled();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+
+    it('starts the attempt when focus moves into an iframe nested in an iDevice', async () => {
         const blur = [];
         const spy = vi.spyOn(window, 'addEventListener').mockImplementation((type, fn) => {
             if (type === 'blur') { blur.push(fn); }
@@ -654,19 +713,16 @@ describe('createScormApi: attempts start on learner interaction', () => {
             // Clicking the applet moves focus to the nested iframe, which becomes the
             // page's active element once the blur has settled.
             document.getElementById('applet').focus();
-            blur.forEach((fn) => fn());
-            vi.runAllTimers();
+            await blurWindow(blur);
             api.LMSSetValue('cmi.core.score.raw', '0');
             scheduled();
             expect(xhr.calls).toHaveLength(1);
         } finally {
             spy.mockRestore();
-            vi.useRealTimers();
         }
     });
 
-    it('does not start the attempt when focus leaves the page outside an iDevice', () => {
-        vi.useFakeTimers();
+    it('does not start the attempt when focus leaves the page outside an iDevice', async () => {
         const blur = [];
         const spy = vi.spyOn(window, 'addEventListener').mockImplementation((type, fn) => {
             if (type === 'blur') { blur.push(fn); }
@@ -676,14 +732,34 @@ describe('createScormApi: attempts start on learner interaction', () => {
             const { api } = createScormApi(config(xhr));
             seedOnLoad(api);
             document.getElementById('next').focus();
-            blur.forEach((fn) => fn());
-            vi.runAllTimers();
+            await blurWindow(blur);
             api.LMSSetValue('cmi.core.score.raw', '0');
             expect(api.LMSFinish()).toBe('true');
             expect(xhr.calls).toHaveLength(0);
         } finally {
             spy.mockRestore();
-            vi.useRealTimers();
+        }
+    });
+
+    it('does not start the attempt when the page loses focus with an iDevice field focused', async () => {
+        // The runtime focuses a field on load; the learner then switches tabs or
+        // clicks the Moodle page. Losing focus is not an answer.
+        const blur = [];
+        const spy = vi.spyOn(window, 'addEventListener').mockImplementation((type, fn) => {
+            if (type === 'blur') { blur.push(fn); }
+        });
+        try {
+            document.getElementById('ide-tf').innerHTML = '<input id="answer">';
+            const xhr = makeXhr(200);
+            const { api } = createScormApi(config(xhr));
+            seedOnLoad(api);
+            document.getElementById('answer').focus();
+            await blurWindow(blur);
+            api.LMSSetValue('cmi.core.score.raw', '0');
+            expect(api.LMSFinish()).toBe('true');
+            expect(xhr.calls).toHaveLength(0);
+        } finally {
+            spy.mockRestore();
         }
     });
 
