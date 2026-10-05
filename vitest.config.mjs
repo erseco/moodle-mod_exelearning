@@ -2,7 +2,7 @@ import { defineConfig } from 'vitest/config';
 
 // Vitest config for the plugin's own JavaScript unit tests. Scope is deliberately
 // narrow: the grade-critical SCORM tracker (js/scorm_tracker.js) and the editor's
-// service-worker shim (editor/index.php). Other UI glue
+// bootstrap script (editor/index.php). Other UI glue
 // (amd/src/fullscreen.js, resize.js, editor_modal.js, ...) and the vendored pipwerks
 // wrappers (assets/scorm/*) are out of scope. The embedded editor (exelearning/) ships
 // its own Vitest suite and is not retested here.

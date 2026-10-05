@@ -222,34 +222,12 @@ $configscript = <<<EOT
     // the Yjs theme bind and leaves the editor unresponsive. WP and Omeka-S
     // ship the same workaround: swallow 404s on .css / idevices URLs and
     // return an empty stylesheet so the editor keeps booting.
-    // Let the static editor register its preview-sw.js: the preview renders
-    // through it, and without it the editor falls back to a blob: URL whose
-    // inlined theme CSS keeps relative url(...) references (icons, sprites)
-    // that cannot resolve, so the preview loses the theme images
-    // (exelearning/exelearning issue 2476). Only a failed registration is
-    // absorbed: environments that proxy or cache the static.php router (e.g.
-    // moodle-playground) 404 the worker script, and the resolved stub keeps
-    // that error out of the console while the editor uses its blob fallback.
+    // Unlike those embedders, navigator.serviceWorker.register is deliberately
+    // left untouched: the preview renders through the editor's preview-sw.js,
+    // and without it the editor's blob: fallback loses the theme images
+    // (exelearning/exelearning issue 2476). The editor already catches a failed
+    // registration and falls back on its own, so no stub is needed.
     (function() {
-        if ("serviceWorker" in navigator) {
-            try {
-                var registerOriginal = navigator.serviceWorker.register
-                    ? navigator.serviceWorker.register.bind(navigator.serviceWorker)
-                    : null;
-                navigator.serviceWorker.register = function(scriptURL, options) {
-                    if (!registerOriginal) {
-                        return Promise.resolve({ scope: "" });
-                    }
-                    return registerOriginal(scriptURL, options).catch(function(err) {
-                        console.warn("[mod_exelearning] Service worker registration failed:", scriptURL, err);
-                        return { scope: "" };
-                    });
-                };
-            } catch (e) {
-                // Some embeds make navigator.serviceWorker non-writable; ignore.
-            }
-        }
-
         var originalFetch = window.fetch;
         if (originalFetch) {
             window.fetch = function(input, init) {

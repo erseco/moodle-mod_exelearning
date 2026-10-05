@@ -66,10 +66,9 @@ The editor bootstrap page is `editor/index.php`. Access requires
 + `require_sesskey()` — teachers only (`editor/index.php:79-82`). It reads the
 active editor `index.html` (resolver), injects a `<base>` tag pointing at
 `editor/static.php/<cmid>` and a Moodle config script, swallows 404s on
-missing `.css`/`idevices` resources, disables `preview-sw.js` registration, and
-appends the bridge script `amd/src/moodle_exe_bridge.js`
-(`editor/index.php:98-322`). The response sets `X-Frame-Options: SAMEORIGIN`
-(`:326`).
+missing `.css`/`idevices` resources, and appends the bridge script
+`amd/src/moodle_exe_bridge.js` (`editor/index.php:98-309`). The response sets
+`X-Frame-Options: SAMEORIGIN` (`:314`).
 
 The client-side overlay is `amd/src/editor_modal.js`. A delegated click on a
 `[data-action="mod_exelearning/editor-open"]` button (`:722-739`) opens a
@@ -84,14 +83,20 @@ registered from `editor/static.php/<cmid>/preview-sw.js` with the scope
 no `Service-Worker-Allowed` header is needed and `editor/static.php` does not send
 one.
 
-`editor/index.php` wraps `navigator.serviceWorker.register` only to absorb a
-**failed** registration: where the `static.php` router is proxied or cached (e.g.
-moodle-playground) the worker script 404s, and the wrapper resolves a stub instead
-of letting the error reach the console. The editor then falls back to a `blob:`
-preview. That fallback is degraded: the inlined theme CSS keeps relative `url(...)`
-references that cannot resolve from a `blob:` URL, so theme icons are missing
-(exelearning/exelearning issue 2476). Blocking the registration unconditionally, as
-earlier versions did, forced that fallback everywhere.
+`editor/index.php` does not wrap `navigator.serviceWorker.register`. Earlier
+versions blocked the registration, which forced the editor's `blob:` preview
+fallback everywhere. That fallback is degraded: the inlined theme CSS keeps relative
+`url(...)` references that cannot resolve from a `blob:` URL, so theme icons are
+missing (exelearning/exelearning issue 2476). The editor's
+`registerPreviewServiceWorker()` already catches a failed registration, logs
+`[Preview SW] Registration failed` with the browser's error and falls back to
+`blob:`; no other editor code calls `register()` outside the standalone PWA mode.
+
+A failed registration is expected where the worker script never reaches Moodle.
+Browsers fetch a service worker script without passing it through any existing
+service worker, so in moodle-playground (whose Moodle runs inside its own service
+worker) the request goes to the static host and 404s; the preview there uses the
+`blob:` fallback.
 
 ### Protocol messages
 
