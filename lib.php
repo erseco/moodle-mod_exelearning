@@ -991,6 +991,32 @@ function exelearning_require_embedded_editor_enabled(): void {
 }
 
 /**
+ * Warning for whoever can rebuild an eXeLearning SCORM/IMS export from the editor.
+ *
+ * Those exports have no website menu (exelearning issue 2477) until they are saved
+ * from the embedded editor, so the warning follows the same gate as view.php's
+ * "Edit with eXeLearning" button. The gate runs before the file lookup so students
+ * never pay for it. The button labels come from their own strings so the
+ * instructions cannot drift from what the teacher sees.
+ *
+ * @param stdClass $exelearning Activity record (needs revision).
+ * @param context_module $context Module context.
+ * @return string|null Localised warning, or null when it does not apply.
+ */
+function exelearning_lms_export_warning(stdClass $exelearning, context_module $context): ?string {
+    if (!has_capability('moodle/course:manageactivities', $context) || !exelearning_embedded_editor_enabled()) {
+        return null;
+    }
+    if (!\mod_exelearning\local\package_manager::content_is_lms_export($context->id, (int) $exelearning->revision)) {
+        return null;
+    }
+    return get_string('lmsexportnonavigation', 'mod_exelearning', (object) [
+        'edit' => get_string('editwitheditor', 'mod_exelearning'),
+        'save' => get_string('savetomoodle', 'mod_exelearning'),
+    ]);
+}
+
+/**
  * Absolute path to the bundled editor static directory, used by
  * editor/static.php to serve the editor's assets.
  *
