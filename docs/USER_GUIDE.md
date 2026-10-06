@@ -1,14 +1,14 @@
-# eXeLearning resource — User Guide
+# eXeLearning — User Guide
 
 A practical, task-oriented guide for **teachers** and **Moodle administrators**
-using the *eXeLearning resource* activity (`mod_exelearning`). It does not assume
+using the *eXeLearning* activity (`mod_exelearning`). It does not assume
 any programming knowledge. Developers should read `DEVELOPMENT.md` instead.
 
 ## Contents
 
-1. [What is the eXeLearning resource?](#1-what-is-the-exelearning-resource)
-2. [Adding an eXeLearning resource to a course](#2-adding-an-exelearning-resource-to-a-course)
-3. [Editing the resource in place](#3-editing-the-resource-in-place-with-the-embedded-editor)
+1. [What is the eXeLearning activity?](#1-what-is-the-exelearning-activity)
+2. [Adding an eXeLearning activity to a course](#2-adding-an-exelearning-activity-to-a-course)
+3. [Editing the activity in place](#3-editing-the-activity-in-place-with-the-embedded-editor)
 4. [How grading works](#4-how-grading-works)
 5. [Previewing as a student](#5-previewing-as-a-student)
 6. [The attempts report](#6-the-attempts-report)
@@ -17,25 +17,25 @@ any programming knowledge. Developers should read `DEVELOPMENT.md` instead.
 
 ---
 
-## 1. What is the eXeLearning resource?
+## 1. What is the eXeLearning activity?
 
-The *eXeLearning resource* activity embeds a published eXeLearning v4 package
+The *eXeLearning* activity embeds a published eXeLearning v4 package
 (an `.elpx` file) directly inside a Moodle course. The package keeps its own
 **native navigation sidebar**, so students browse the content exactly as the
 author designed it. At the same time, Moodle inspects the package and registers
 **each gradable iDevice** (interactive exercise such as a true/false question,
 a drag-and-drop, a crossword, and so on) as its **own column in the gradebook**.
-A single resource can therefore contribute several independent grade columns —
-for example, one resource containing two quizzes records two separate grades —
+A single activity can therefore contribute several independent grade columns —
+for example, one activity containing two quizzes records two separate grades —
 which is what sets this activity apart from a plain SCORM package that reports
 only one aggregated grade.
 
 ---
 
-## 2. Adding an eXeLearning resource to a course
+## 2. Adding an eXeLearning activity to a course
 
 1. Turn editing on in your course and choose **Add an activity or resource**.
-2. Select **eXeLearning resource**.
+2. Select **eXeLearning**.
 3. Fill in the form (fields are explained below) and click **Save**.
 
 When you save, Moodle extracts the package, renders it, and automatically
@@ -92,7 +92,7 @@ creates the gradebook columns for every gradable iDevice it detects.
 
 - **Show eXeLearning teacher-mode toggle** — eXeLearning packages can include a
   "teacher mode" toggle that reveals content marked for teachers only. When this
-  setting is disabled (the default), that toggle is hidden inside the resource by
+  setting is disabled (the default), that toggle is hidden inside the activity by
   injecting CSS into the package, so students never see it. Enable it to let the
   toggle appear. This is independent of the *Try as a student (preview)* button,
   which is always available to teachers.
@@ -102,7 +102,7 @@ completion conditions, groups, and so on).
 
 ---
 
-## 3. Editing the resource in place with the embedded editor
+## 3. Editing the activity in place with the embedded editor
 
 The embedded eXeLearning editor ships with the plugin, so on a standard install
 (from an official release ZIP) teachers can edit the package without leaving
@@ -138,8 +138,8 @@ controls which columns are created:
   each exercise is a distinct graded task — it is what makes this activity more
   granular than a plain SCORM package.
 - **Overall only** — choose this when you only care about a single combined
-  score for the whole resource (the SCORM-style behaviour). Best when the
-  individual exercises are practice and you grade the resource as a whole.
+  score for the whole activity (the SCORM-style behaviour). Best when the
+  individual exercises are practice and you grade the activity as a whole.
 
 You can switch between the two models at any time; switching removes the columns
 that no longer apply and creates the ones that do. Grade history is preserved.
@@ -217,7 +217,7 @@ with "The attempt was deleted and the grade was recalculated."
 
 These tasks require administrator rights (the
 `mod/exelearning:manageembeddededitor` capability and `moodle/site:config`).
-Go to **Site administration > Plugins > Activity modules > eXeLearning resource**
+Go to **Site administration > Plugins > Activity modules > eXeLearning**
 (`admin/settings.php?section=modsettingexelearning`). Everything is on a single
 page.
 
