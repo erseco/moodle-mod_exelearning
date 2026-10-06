@@ -1,4 +1,4 @@
-# eXeLearning resource for Moodle
+# eXeLearning for Moodle
 
 [![Moodle Plugin CI](https://github.com/exelearning/moodle-mod_exelearning/actions/workflows/ci.yml/badge.svg)](https://github.com/exelearning/moodle-mod_exelearning/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/exelearning/moodle-mod_exelearning/graph/badge.svg)](https://codecov.io/gh/exelearning/moodle-mod_exelearning)
@@ -7,17 +7,17 @@
 
 > ℹ️ The eXeLearning editor is fetched from the shared release and unpacked into the plugin when the playground boots, so the first load may take a few extra seconds. ELPX upload, viewer and preview work normally.
 
-> **Activity-type Moodle module to create, edit and grade eXeLearning resources
+> **Activity-type Moodle module to create, edit and grade eXeLearning packages
 > (`.elpx`) directly in Moodle, preserving eXeLearning's native navigation and
 > supporting multiple gradebook items per activity.**
 
 > **For teachers and administrators:** see the [User Guide](https://github.com/exelearning/moodle-mod_exelearning/blob/main/docs/USER_GUIDE.md)
 > for step-by-step instructions on adding, editing and grading eXeLearning
-> resources, plus site-administration and troubleshooting notes.
+> activities, plus site-administration and troubleshooting notes.
 
 Activity-type module to embed eXeLearning v4 packages (`.elpx`) inside Moodle while
 **preserving the package's native sidebar navigation** and **recording one or more
-gradable items per resource** in the Moodle gradebook (e.g. a single resource with
+gradable items per activity** in the Moodle gradebook (e.g. a single activity with
 two quizzes registers two independent gradebook columns).
 
 This plugin merges the best of two siblings:

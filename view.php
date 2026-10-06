@@ -174,6 +174,12 @@ if (!$mainfile) {
         );
     }
 } else {
+    // An eXeLearning SCORM/IMS export has no website menu until it is saved from the
+    // editor (exelearning issue 2477): tell whoever can do that.
+    $lmsexportwarning = exelearning_lms_export_warning($exelearning, $context);
+    if ($lmsexportwarning !== null) {
+        echo $OUTPUT->notification($lmsexportwarning, \core\output\notification::NOTIFY_WARNING);
+    }
     // Resolve the iframe security mode once (DEC-80-02, corrects DEC-80-01's Route A).
     // Secure mode serves the package through tokenpluginfile.php so the opaque-origin
     // iframe's subresources (CSS/JS/images) carry a per-user file token in the URL and
