@@ -50,9 +50,13 @@ define('EXELEARNING_COMPLETIONSTATUS_ANY', 3); // Require a passed OR completed 
  * @return mixed
  */
 function exelearning_supports($feature) {
+    // Moodle 5.1+ only: a secondary purpose also lists the activity under
+    // assessment (DEC-159-01). Resolved here, not as a switch case: evaluating the
+    // undefined constant as a case would throw on 4.5 and 5.0.
+    $otherpurpose = defined('FEATURE_MOD_OTHERPURPOSE') ? constant('FEATURE_MOD_OTHERPURPOSE') : null;
+    // No FEATURE_MOD_ARCHETYPE: the default (MOD_ARCHETYPE_OTHER) is what lists the
+    // module under the chooser's "Activities" tab on 4.5 and 5.0 (DEC-159-01).
     switch ($feature) {
-        case FEATURE_MOD_ARCHETYPE:
-            return MOD_ARCHETYPE_ASSIGNMENT;
         case FEATURE_GROUPS:
             return true;
         case FEATURE_GROUPINGS:
@@ -72,9 +76,11 @@ function exelearning_supports($feature) {
         case FEATURE_SHOW_DESCRIPTION:
             return true;
         case FEATURE_MOD_PURPOSE:
-            return MOD_PURPOSE_ASSESSMENT;
+            // Interactive content that may carry graded iDevices, like SCORM, H5P
+            // and Lesson (DEC-159-01, supersedes DEC-37-01).
+            return MOD_PURPOSE_INTERACTIVECONTENT;
         default:
-            return null;
+            return ($otherpurpose !== null && $feature === $otherpurpose) ? MOD_PURPOSE_ASSESSMENT : null;
     }
 }
 
@@ -82,8 +88,7 @@ function exelearning_supports($feature) {
  * Whether the activity icon is branded.
  *
  * Branded icons keep their own colours: Moodle skips the purpose colour filter
- * that would otherwise tint the monologo pink for MOD_PURPOSE_ASSESSMENT
- * (exelearning/exelearning issue 2453). The purpose itself stays unchanged.
+ * that would otherwise tint the monologo (exelearning/exelearning issue 2453).
  *
  * @return bool Always true, so pix/monologo.svg renders in the official colour.
  */
@@ -983,6 +988,32 @@ function exelearning_require_embedded_editor_enabled(): void {
     if (!exelearning_embedded_editor_enabled()) {
         throw new moodle_exception('editordisabledbyadmin', 'mod_exelearning');
     }
+}
+
+/**
+ * Warning for whoever can rebuild an eXeLearning SCORM/IMS export from the editor.
+ *
+ * Those exports have no website menu (exelearning issue 2477) until they are saved
+ * from the embedded editor, so the warning follows the same gate as view.php's
+ * "Edit with eXeLearning" button. The gate runs before the file lookup so students
+ * never pay for it. The button labels come from their own strings so the
+ * instructions cannot drift from what the teacher sees.
+ *
+ * @param stdClass $exelearning Activity record (needs revision).
+ * @param context_module $context Module context.
+ * @return string|null Localised warning, or null when it does not apply.
+ */
+function exelearning_lms_export_warning(stdClass $exelearning, context_module $context): ?string {
+    if (!has_capability('moodle/course:manageactivities', $context) || !exelearning_embedded_editor_enabled()) {
+        return null;
+    }
+    if (!\mod_exelearning\local\package_manager::content_is_lms_export($context->id, (int) $exelearning->revision)) {
+        return null;
+    }
+    return get_string('lmsexportnonavigation', 'mod_exelearning', (object) [
+        'edit' => get_string('editwitheditor', 'mod_exelearning'),
+        'save' => get_string('savetomoodle', 'mod_exelearning'),
+    ]);
 }
 
 /**
