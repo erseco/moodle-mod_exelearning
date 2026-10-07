@@ -98,6 +98,19 @@ service worker, so in moodle-playground (whose Moodle runs inside its own servic
 worker) the request goes to the static host and 404s; the preview there uses the
 `blob:` fallback.
 
+### UI language
+
+The editor UI (menus and iDevice names) follows the Moodle user's current
+language. The static editor has no locale option in its embedding config: it
+reads the `exe_user_preferences` localStorage entry, then the browser language,
+then English. `editor/index.php` therefore writes the editor locale returned by
+`embedded_editor_source_resolver::get_editor_locale(current_language())` into
+that entry before the editor boots. Regional variants map to the base language
+(`es_mx` → `es`, `pt_br` → `pt`) and `ca_valencia` maps to `va`. A language the
+bundle does not ship (no `app/common/i18n/common_i18n.<code>.js`) leaves the
+editor's own resolution in place. Moodle's language wins each time the editor
+opens, so a language chosen inside the editor lasts only until it is reopened.
+
 ### Protocol messages
 
 `postToEditor()` (`:241-250`) is the single send path; it forwards `transfer`
