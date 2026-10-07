@@ -193,6 +193,12 @@ $themeoverride = json_encode(
     \mod_exelearning\local\styles_service::build_theme_registry_override()
 );
 
+// Editor UI locale matching the Moodle user's current language (null when the
+// bundled editor does not ship it).
+$editorlocale = json_encode(
+    \mod_exelearning\local\embedded_editor_source_resolver::get_editor_locale(current_language())
+);
+
 // Inject configuration scripts before </head>.
 // The static editor boot sequence reassigns window.eXeLearning and
 // window.eXeLearning.config repeatedly (the inline script in index.html
@@ -205,6 +211,30 @@ $configscript = <<<EOT
 <script>
     window.__MOODLE_EXE_CONFIG__ = $moodleconfig;
     window.__EXE_EMBEDDING_CONFIG__ = $embeddingconfig;
+
+    // The static editor takes its UI language (menus and iDevice names) from
+    // the "exe_user_preferences" localStorage entry, then the browser language,
+    // then English, and stores the detected language there on first launch; the
+    // embedding config has no locale option. Write Moodle's language into that
+    // entry before the editor boots so the editor follows Moodle. The editor
+    // cannot tell that stored first-launch value from an explicit choice, so
+    // Moodle wins on every open: a language picked inside the editor lasts until
+    // the editor is reopened. A language the editor does not ship (null) leaves
+    // the editor's own resolution untouched, as does unavailable storage.
+    (function() {
+        var LOCALE = $editorlocale;
+        if (!LOCALE) return;
+        try {
+            var prefs = JSON.parse(localStorage.getItem("exe_user_preferences") || "{}");
+            if (!prefs || typeof prefs !== "object") prefs = {};
+            prefs.userPreferences = prefs.userPreferences || {};
+            prefs.userPreferences.locale = { value: LOCALE };
+            localStorage.setItem("exe_user_preferences", JSON.stringify(prefs));
+        } catch (e) {
+            // Corrupt or blocked storage: keep the editor's own language.
+        }
+    })();
+
     (function() {
         var OVERRIDE = $themeoverride;
         function injectConfig(cfg) {
