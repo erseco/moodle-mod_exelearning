@@ -30,7 +30,9 @@ const MOD_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'
  * four places — the resolver, the roots map, the iteration order and the usage note — with
  * nothing to catch a spot that was missed.
  */
-const REPOS = ['core', 'mod', 'wp', 'omeka', 'procomun', 'nextcloud'];
+// Nextcloud is not listed: it ships the vendored exe_external_media bundle instead of
+// hand-maintained relay/shim copies, so it has no mirror for this tool to check.
+const REPOS = ['core', 'mod', 'wp', 'omeka', 'procomun'];
 const MIRRORS = REPOS.filter((repo) => repo !== 'mod');
 
 /** The flag and environment variable a mirror is passed with. */
@@ -112,8 +114,8 @@ const MEDIA_HOST_INVARIANTS = [
 ];
 
 const FILES = {
-    relay: { core: 'public/app/common/exe_embed_bridge/exe_embed_relay.js', mod: 'js/exe_embed_relay.js', wp: 'assets/js/exe-embed-relay.js', omeka: 'asset/js/exe-embed-relay.js', procomun: 'apps/frontend/public/elpx/exe_embed_relay.js', nextcloud: 'src/embed/exe_embed_relay.js', invariants: RELAY_INVARIANTS },
-    shim: { core: 'public/app/common/exe_embed_bridge/exe_embed_shim.js', mod: 'js/exe_embed_shim.js', wp: 'assets/js/exe-embed-shim.js', omeka: 'asset/js/exe-embed-shim.js', procomun: 'apps/api/static/elpx/embed-shim.js', nextcloud: 'src/embed/exe_embed_shim.js', invariants: SHIM_INVARIANTS },
+    relay: { core: 'public/app/common/exe_embed_bridge/exe_embed_relay.js', mod: 'js/exe_embed_relay.js', wp: 'assets/js/exe-embed-relay.js', omeka: 'asset/js/exe-embed-relay.js', procomun: 'apps/frontend/public/elpx/exe_embed_relay.js', invariants: RELAY_INVARIANTS },
+    shim: { core: 'public/app/common/exe_embed_bridge/exe_embed_shim.js', mod: 'js/exe_embed_shim.js', wp: 'assets/js/exe-embed-shim.js', omeka: 'asset/js/exe-embed-shim.js', procomun: 'apps/api/static/elpx/embed-shim.js', invariants: SHIM_INVARIANTS },
     php: { mod: 'classes/local/ui/player_iframe.php', wp: 'includes/class-iframe-sandbox.php', omeka: 'src/Service/IframeSandbox.php', invariants: PHP_INVARIANTS },
     mediapolicy: { core: 'public/app/common/exe_media_bridge/exe_media_policy.js', mod: 'js/exe_media_policy.js', wp: 'assets/js/exe-media-policy.js', omeka: 'asset/js/exe-media-policy.js', procomun: 'apps/frontend/public/elpx/exe_media_policy.js', invariants: MEDIA_POLICY_INVARIANTS },
     mediahost: { mod: 'js/exe_media_host.js', wp: 'assets/js/exe-media-host.js', omeka: 'asset/js/exe-media-host.js', procomun: 'apps/frontend/public/elpx/exe_media_host.js', invariants: MEDIA_HOST_INVARIANTS },
