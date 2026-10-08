@@ -100,17 +100,35 @@ final class grade_item_manager {
     }
 
     /**
-     * Human-readable label for the gradebook column of an iDevice.
+     * Human-readable label for the gradebook column of an iDevice:
+     * "activity · page · title", where the title is the one the author gave the
+     * iDevice, or its translated type name when it has none (exelearning issue 2459).
+     * The stored name is shared by every gradebook viewer, so the type is translated
+     * into the course's forced language, else the site language, never the language
+     * of whoever triggers the sync: a re-sync by another user must not rename the
+     * column. When several
+     * columns would share that label, the caller passes the stable itemnumber, which
+     * prefixes the title ("#3 title") so the columns stay distinguishable.
      *
      * @param stdClass $instance
      * @param stdClass $detected
+     * @param int|null $itemnumber Itemnumber to show, or null when the label is unique.
      * @return string
      */
-    public static function format_name(stdClass $instance, stdClass $detected): string {
-        $type = clean_param($detected->idevicetype, PARAM_TEXT);
+    public static function format_name(stdClass $instance, stdClass $detected, ?int $itemnumber = null): string {
+        $title = trim(clean_param((string) ($detected->title ?? ''), PARAM_TEXT));
+        if ($title !== '') {
+            $label = $title;
+        } else {
+            $type = clean_param((string) $detected->idevicetype, PARAM_TEXT);
+            $label = \mod_exelearning\local\idevice_types::label($type, self::name_language($instance));
+        }
+        if ($itemnumber !== null) {
+            $label = '#' . $itemnumber . ' ' . $label;
+        }
         $page = trim((string) ($detected->pagename ?? ''));
         $base = clean_param($instance->name, PARAM_NOTAGS);
-        $name = ($page !== '') ? ($base . ' · ' . $page . ' · ' . $type) : ($base . ' · ' . $type);
+        $name = ($page !== '') ? ($base . ' · ' . $page . ' · ' . $label) : ($base . ' · ' . $label);
         // Clamp to the exelearning_grade_item.name column width (char 255). The page
         // title comes from author-controlled content.xml and is unbounded; combined
         // with an up-to-255-char activity name it can exceed 255 and throw a
@@ -118,6 +136,24 @@ final class grade_item_manager {
         // student-facing fatal (B5, DEC-34-01). core_text::substr is multibyte-safe and
         // deterministic, so re-sync does not thrash the stored name.
         return \core_text::substr($name, 0, 255);
+    }
+
+    /**
+     * Language for the stored gradebook column names of an activity: the course's
+     * forced language when it has one, otherwise the site default language.
+     *
+     * @param stdClass $instance The exelearning instance row (its course id may be absent).
+     * @return string Language code.
+     */
+    private static function name_language(stdClass $instance): string {
+        global $CFG, $DB;
+        if (!empty($instance->course)) {
+            $courselang = $DB->get_field('course', 'lang', ['id' => (int) $instance->course]);
+            if (!empty($courselang)) {
+                return (string) $courselang;
+            }
+        }
+        return (string) $CFG->lang;
     }
 
     /**

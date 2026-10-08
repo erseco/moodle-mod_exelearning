@@ -1,8 +1,9 @@
 # Tracking — end-to-end pipeline and security model
 
 > Canonical end-to-end map of how an eXeLearning iDevice score reaches the Moodle
-> gradebook, and the server-side safeguards that make a hostile package or a forged
-> request unable to inflate a grade. This is the entry point; the two detailed docs
+> gradebook, and the server-side safeguards that bound what a hostile package or a forged
+> request can do to a grade (they do not stop a learner from choosing their own score;
+> see threat 1). This is the entry point; the two detailed docs
 > stay authoritative for their slice:
 > - `scorm-shim-current-flow.md` — the SCORM 1.2 shim as shipped today (step-by-step).
 > - `tracking-architecture.md` — the single-channel architecture and the retired xAPI channel (DEC-122-01).
@@ -94,28 +95,50 @@ The package and the request are **not** trusted to assert identity, ownership, o
 final grade. The authenticated Moodle session (`$USER`) is the grading subject; the
 server re-derives the overall and only routes to grade items it already knows.
 
+What the server **cannot** check is the per-iDevice score itself. SCORM 1.2 grades on the
+client: the iDevice computes the score in the learner's browser and reports it. Any
+authenticated learner holding `mod/exelearning:savetrack` can therefore POST `track.php`
+(or call `save_track`) with a valid sesskey and arbitrary `itemscores` for the registered
+objectids, and get up to full marks on every item. Threats 1–3 bound the **range**
+(clamping, registered items only) and threat 7/the attempt cap bound **who** and **how
+often**; none of them bound **which value** the learner sends. This is the same accepted
+risk as core `mod_scorm` and any client-graded SCORM player; use a server-graded activity
+(e.g. `mod_quiz`) when that matters.
+
 | # | Threat | Vector | Mitigation | Evidence (`file:line`) |
 |---|--------|--------|------------|------------------------|
-| 1 | Inflate the overall grade | Client posts a high `cmi.core.score.raw` | When an objectid map is present the server **recomputes** the overall from per-iDevice `itemscores` (weighted mean) and uses that, never the client overall (DEC-6-01) | `classes/local/track.php:175-189`; recompute in `recompute_overall_pct()` `classes/local/track.php:308-328` |
+| 1 | Inflate the overall grade | Client posts a high `cmi.core.score.raw` | When an objectid map is present the server **recomputes** the overall from per-iDevice `itemscores` (weighted mean) and uses that, never the client overall (DEC-6-01). **Accepted risk:** the per-iDevice scores are themselves client-reported, so a learner who forges `itemscores` still gets the grade they send, within range (see above) | `classes/local/track.php:175-189`; recompute in `recompute_overall_pct()` `classes/local/track.php:308-328` |
 | 2 | Skew the grade with unknown items | Inject extra/forged objectids into `itemscores` | Map is `array_filter`-ed to **registered** objectids before recompute (`registered_objectids()`); `apply_item_scores()` independently drops any objectid with no grade item | filter `classes/local/track.php:117-124`; `registered_objectids()` `:466-474`; drop in `apply_item_scores()` `:382-384` |
 | 3 | Out-of-range CMI score (e.g. 150%) | `score.raw`/`score.max` or a `150%` in `cmi.suspend_data` | Overall normalised to grade scale then **clamped** to `[grademin, grademax]`; per-iDevice percentages clamped `0..100` before scaling | overall clamp `classes/local/track.php:89-93` & `:178`; suspend clamp `:272`; per-item clamp `apply_item_scores()` `:387` and `recompute_overall_pct()` `:317` |
 | 4 | Oversized `itemscores` map (abuse/DoS) | Post thousands of entries | Map `> 1000` entries is dropped with a developer-level `debugging()` notice (a real package emits one entry per gradable iDevice) | `classes/local/track.php:104-112` |
 | 5 | Grade another user | Spoof a userid in the payload | The payload carries no userid; `ingest()` is always called with `$USER->id` (web `track.php:66`, WS `save_track.php:137`) | `track.php:66`; `classes/external/save_track.php:137` |
 | 6 | CSRF on the tracking endpoint | Cross-site POST to `track.php` | The session key is confirmed before any work. It is carried in the JSON body, not the query string, so access logs and proxies never record it (SEC-04) | `track.php:51`; `classes/local/tracking_endpoint.php` |
 | 7 | Unauthorised save | Unauthenticated / unprivileged POST | `require_login($course,…,$cm)` then `require_capability('mod/exelearning:savetrack')` (preview path needs `moodle/course:manageactivities`); WS adds `validate_context()` + same capability | `track.php:46,49-55`; `save_track.php:105-107` |
-| 8 | Malicious package navigates parent / spams modals | iDevice JS tries `top.location` / `alert()` | Iframe `sandbox` grants `allow-scripts allow-same-origin allow-popups allow-forms allow-popups-to-escape-sandbox`; **no** `allow-top-navigation`, **no** `allow-modals` (also no pointer/orientation/presentation lock) | `view.php:569-579`; rationale `research/analisis/notas/AN-008-iframe-vs-scorm-player.md:116-126` |
+| 8 | Malicious package navigates parent / spams modals | iDevice JS tries `top.location` / `alert()` | **Not enforceable.** The `sandbox` omits `allow-top-navigation` and `allow-modals`, but it also grants `allow-same-origin` next to `allow-scripts`, so package JS can reach `parent`/`top` (same origin, unsandboxed realm) and call `parent.alert()`, set `parent.location`, or rewrite the Moodle page. The omissions only stop the naive in-frame calls. Accepted residual risk; the real fix is a separate origin (RIE-001, see below) | `view.php:388-412`; rationale `research/analisis/notas/AN-008-iframe-vs-scorm-player.md:116-153` |
 | 9 | Status-only commit recorded as a real 0 | Mobile sends a status update with no score | `scoreraw` is nullable; omitting it skips `cmi.core.score.raw`, so `ingest()` no-ops instead of persisting a 0-score attempt (DEC-34-01 / B6) | `save_track.php:60-66,121-129`; no-op guard `classes/local/track.php:79-82` |
+| 10 | Package HTML opened top-level, outside the iframe | Learner (or a link inside the package) opens a `content/` file URL directly | **None at serve time.** `exelearning_pluginfile()` serves the `content` area to anyone with `mod/exelearning:view` as a same-origin document with no sandbox and no CSP (SVG inline too), so the iframe sandbox does not apply. Package JS then runs with the viewer's full Moodle session. Today's only control is **who can upload**: `mod/exelearning:addinstance` and `moodle/course:manageactivities` carry `RISK_XSS`, the same trust model as `mod_scorm`/`mod_resource`. The real fix is serving `content/` from a separate origin (RIE-001 / DEC-0-16) | `lib.php:522-580`; `db/access.php:38-46` |
 
 ### Residual risk
 
 The iframe carries both `allow-scripts` and `allow-same-origin`, which Chrome flags as
 escapable. This is accepted **knowingly**: the SCORM bridge is 100% same-origin (the
 parent reads `iframe.contentDocument` for the objectid map, the child walks
-`window.parent.API`, the teacher-mode hider injects CSS into the content document), so
-removing `allow-same-origin` would break tracking. Cross-component XSS hardening
+`window.parent.API`), so removing `allow-same-origin` would break tracking. The same
+flag means the sandbox does not contain a hostile package (threat 8), and a `content/`
+file opened top-level has no sandbox at all (threat 10); until RIE-001 lands, the upload capability
+is the boundary. Cross-component XSS hardening
 (dedicated origin / `Permissions-Policy` / CSP, dropping
 `allow-popups-to-escape-sandbox`) is roadmapped as **RIE-001** / **DEC-0-16** — see
 `research/analisis/notas/AN-008-iframe-vs-scorm-player.md:124-153`.
+
+The sandbox also grants `allow-downloads`. Without it the browser silently drops
+every download the frame starts: `<a download>` links and the download-source-file
+iDevice's "Download .elpx" button, which rebuilds the package in the browser
+(exelearning/exelearning#2488). It adds nothing to threat 8, because same-origin package
+script can already start a download through the parent. Any future CSP for the
+`content` area (DEC-0-16 M3) must also allow `worker-src 'self' blob:`. Otherwise that
+button's fflate compression cannot start its workers, and in packages exported before
+exelearning/exelearning#2489 it hangs at "Processing... 100%".
 
 ## What is, and is not, tech debt
 
@@ -125,13 +148,11 @@ report scores, and since DEC-122-01 retired the xAPI channel it is the only brow
 channel there is (`tracking-architecture.md`).
 
 The tech debt is the **serve-time HTML injection** into the extracted package:
-`exelearning_inject_scorm_loader()` (delegador en `lib.php`) →
-`\mod_exelearning\local\scorm\scorm_injector::inject()`,
-`exelearning_patch_idevice_save_guards()` (delegador) →
-`\mod_exelearning\local\scorm\idevice_patch::patch()` and the teacher-mode hider
-`exelearning_require_teacher_mode_hider()` (delegador) →
-`\mod_exelearning\local\ui\teacher_mode_hider::require_for_iframe()` (DEC-71-01). Those rewrite the package's
-own HTML/JS at serve time and are tracked for upstream resolution by **DEC-34-02**
+`\mod_exelearning\local\scorm\scorm_injector::inject()`
+and `\mod_exelearning\local\scorm\idevice_patch::patch()` (DEC-71-01), both applied by
+`package_manager` at extraction. The former teacher-mode hider is gone: `view.php` now
+appends the package's own `?exe-teacher=1` parameter instead. Those rewrite the package's
+own HTML/JS and are tracked for upstream resolution by **DEC-34-02**
 (serve-time transform) and **DEC-36-01** (plugin-side vs eXeLearning-upstream injections)
 — `research/decisiones/adr/DEC-34-02-transformacion-en-servido.md` and
 `research/decisiones/adr/DEC-36-01-inyecciones-scorm-teacher-mode-plugin-vs-upstream.md`.

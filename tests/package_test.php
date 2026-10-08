@@ -593,6 +593,38 @@ final class package_test extends advanced_testcase {
     }
 
     /**
+     * Each detected iDevice carries the title its author gave it (the enclosing
+     * block's blockName), which names its gradebook column (exelearning issue 2459).
+     */
+    public function test_real_datagame_fixture_detects_authored_titles(): void {
+        $this->resetAfterTest();
+
+        $detected = $this->detect_raw($this->load_fixture_xml('real-datagame'));
+
+        $titles = [];
+        foreach ($detected as $item) {
+            $titles[$item->idevicetype] = $item->title;
+        }
+        ksort($titles);
+        $this->assertSame(['guess' => 'Adivina', 'trueorfalse' => 'Verdadero o falso'], $titles);
+    }
+
+    /**
+     * A package without blocks (the flat odeNavStructure serialisation) has no
+     * authored title: the title is empty so callers fall back to the iDevice type.
+     */
+    public function test_package_without_block_names_has_empty_titles(): void {
+        $this->resetAfterTest();
+
+        $detected = $this->detect_raw($this->load_fixture_xml('real-multipage'));
+
+        $this->assertNotEmpty($detected);
+        foreach ($detected as $item) {
+            $this->assertSame('', $item->title);
+        }
+    }
+
+    /**
      * Regression on the real package attached to issue #29: Video interactivo,
      * Verdadero/Falso and Quiz adaptativo expose `isScorm`, while GeoGebra exposes
      * only the `auto-geogebra-scorm` HTML class. All four must create grade items.
@@ -730,6 +762,42 @@ final class package_test extends advanced_testcase {
         ], $zippath);
 
         $this->assertSame([], (new package($file))->detect_gradable_idevices());
+    }
+
+    /**
+     * Detection reads only content.xml: the package media is never extracted to temp.
+     *
+     * Regression: stored_file::extract_to_pathname() ignores an $onlyfiles filter, so every
+     * scan used to extract the whole archive, media included.
+     */
+    public function test_detection_extracts_only_content_xml(): void {
+        $this->resetAfterTest();
+
+        $tmp = make_request_directory();
+        file_put_contents($tmp . '/content.xml', $this->build_content_xml([
+            ['p1', 'idevice-tf', 'trueorfalse', "<answer>true</answer>\n", 1],
+        ]));
+        file_put_contents($tmp . '/source.bin', random_bytes(64));
+        $zippath = make_request_directory() . '/pkg.elpx';
+        get_file_packer('application/zip')->archive_to_pathname([
+            'content.xml' => $tmp . '/content.xml',
+            'content/resources/unextracted-media.bin' => $tmp . '/source.bin',
+        ], $zippath);
+        $file = get_file_storage()->create_file_from_pathname([
+            'contextid' => \context_system::instance()->id, 'component' => 'mod_exelearning',
+            'filearea' => 'package', 'itemid' => 0, 'filepath' => '/', 'filename' => 'media.elpx',
+        ], $zippath);
+
+        $items = (new package($file))->detect_gradable_idevices();
+
+        $this->assertCount(1, $items);
+        $leaked = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator(
+            get_request_storage_directory(),
+            \FilesystemIterator::SKIP_DOTS
+        ));
+        foreach ($leaked as $path) {
+            $this->assertNotSame('unextracted-media.bin', $path->getFilename());
+        }
     }
 
     /**

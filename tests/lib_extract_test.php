@@ -27,7 +27,6 @@ use advanced_testcase;
  * @copyright  2026 ATE (Área de Tecnología Educativa)
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  * @covers     ::exelearning_extract_stored_package
- * @covers     ::exelearning_inject_scorm_loader
  * @covers     ::exelearning_get_stored_package
  * @covers     ::exelearning_package_has_content_xml
  * @covers     \mod_exelearning\local\package_manager
@@ -42,7 +41,7 @@ final class lib_extract_test extends advanced_testcase {
      * Creating an instance from the default ELPX fixture expands the package into
      * the content filearea, ships the SCORM wrapper shim and rewrites the HTML so
      * the wrapper loads at page-load time (exelearning_extract_stored_package() and
-     * exelearning_inject_scorm_loader()).
+     * \mod_exelearning\local\scorm\scorm_injector::inject()).
      */
     public function test_create_instance_extracts_package_and_injects_scorm_loader(): void {
         global $DB;
@@ -124,6 +123,43 @@ final class lib_extract_test extends advanced_testcase {
                 "$name served to learners is not the copy the plugin ships"
             );
         }
+    }
+
+    /**
+     * A SCORM export installs pages without the website menu (exelearning issue 2477).
+     *
+     * eXeLearning's SCORM exporter leaves the navigation out of the HTML and leaves it
+     * to the LMS, but still ships content.xml, so the plugin accepts it. The installed
+     * content is recognised by its root imsmanifest.xml; an editor-saved .elpx has none.
+     *
+     * @dataProvider lms_export_provider
+     * @param string $fixture Package fixture, relative to the plugin root.
+     * @param bool $expected Whether the installed content is an LMS export.
+     */
+    public function test_content_is_lms_export(string $fixture, bool $expected): void {
+        global $DB;
+        $this->resetAfterTest();
+        $this->setAdminUser();
+
+        $course = $this->getDataGenerator()->create_course();
+        $instance = $this->getDataGenerator()->get_plugin_generator('mod_exelearning')
+            ->create_instance(['course' => $course->id, 'packagefilepath' => $fixture]);
+        $context = \context_module::instance(get_coursemodule_from_instance('exelearning', $instance->id)->id);
+        $revision = (int) $DB->get_field('exelearning', 'revision', ['id' => $instance->id]);
+
+        $this->assertSame($expected, \mod_exelearning\local\package_manager::content_is_lms_export($context->id, $revision));
+    }
+
+    /**
+     * Packages with and without the website navigation.
+     *
+     * @return array
+     */
+    public static function lms_export_provider(): array {
+        return [
+            'SCORM 1.2 export' => ['research/fixtures/scorm/actividad-evaluable_scorm.zip', true],
+            'editor .elpx'     => ['research/fixtures/elpx/actividad-evaluable.elpx', false],
+        ];
     }
 
     /**

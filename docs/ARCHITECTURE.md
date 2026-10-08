@@ -22,19 +22,22 @@ pipeline backs the `save_track` web service. `classes/external` exposes the API 
 |---|---|---|---|
 | **Moodle façade** | `lib.php` | Module callbacks: `*_supports`, `*_add/update/delete_instance`, `*_pluginfile`, `*_get_file_areas`, `*_view`, grade callbacks (`*_grade_item_update`, `*_update_grades`, `*_recalculate_user_grades`, `*_get_grade_item_names`), reset, settings navigation. Each non-trivial callback is now a **thin delegator** to a domain class. | Moodle requires these named functions in `lib.php`; they are the contract with core. The heavy logic moved out ([[DEC-71-01]]); only the Moodle-mandated signatures and wrappers stay. |
 | **Grades domain** | `classes/grades/grade_sync.php`, `grade_recalculator.php`, `grade_item_manager.php`, `completion_validator.php`, `gradeitems.php` | `grade_sync`: detect gradable iDevices and synchronise/soft-delete grade items (multi-`itemnumber`), staleness warning, re-publish from attempts. `grade_recalculator`: batched re-aggregation per user/item (no N+1). `grade_item_manager`: overall-item guard, column naming/truncation, remove-all, grade-category reparent. `completion_validator`: completion-by-grade form relaxation. `gradeitems`: `itemnumber_mapping`. | Gradebook math/lifecycle extracted from `lib.php` so it is unit-testable in isolation ([[DEC-71-01]]); no grade rule changed, only relocated. |
-| **Package domain** | `classes/local/package.php`, `classes/local/package_manager.php` | `package`: parse `content.xml`, detect gradable iDevices (`isScorm`), content hashing, XML hardening. `package_manager`: store/locate the ELPX (any itemid), validate `content.xml`, extract to `content/{revision}/`, build the package URL. | Pure parsing/detection (`package`) and filearea lifecycle (`package_manager`), testable in isolation; no UI coupling ([[DEC-71-01]]). |
+| **Package domain** | `classes/local/package.php`, `classes/local/package_manager.php`, `classes/local/zip_utils.php` | `package`: parse `content.xml`, detect gradable iDevices (`isScorm`), content hashing, XML hardening. `package_manager`: store/locate the ELPX (any itemid), validate `content.xml`, extract to `content/{revision}/`, activate a revision and prune superseded ones, build the package URL; `save_editor_package()` stages and activates an editor export (size limit, rollback on failure); `self_heal()` extracts/re-syncs a package stored without going through the form and `refresh_runtime()` re-extracts when the bundled SCORM runtime changed ([[DEC-105-01]]), both under the per-instance package lock. `zip_utils`: unsafe-entry and extraction-containment checks shared by every ZIP extraction site. | Pure parsing/detection (`package`) and filearea lifecycle (`package_manager`), testable in isolation; no UI coupling ([[DEC-71-01]]). |
 | **SCORM transforms** | `classes/local/scorm/scorm_injector.php`, `classes/local/scorm/idevice_patch.php` | `scorm_injector`: inject the SCORM wrapper `<script>` tags + `init()` into the extracted HTML. `idevice_patch`: drop the `body.exe-scorm` save guard from `form`/`scrambled-list` ([[DEC-13-11]]). | Serve-time package mutation isolated from `lib.php` ([[DEC-71-01]]); the known debt is unchanged (see below). |
-| **URLs / UI** | `classes/local/urls.php`, `classes/local/ui/teacher_mode_hider.php` | `urls`: gradebook deep-link / grade-analysis / navigation-before-key builders. `teacher_mode_hider`: queue the iframe teacher-toggle hider JS. | Small URL/UI helpers extracted from `lib.php` ([[DEC-71-01]]). |
-| **Tracking domain** | `classes/local/track.php` | Ingest tracking payloads: normalise/clamp scores, route by stable `objectid`, recompute the overall server-side, enforce attempt caps, drive completion. | Single source of truth for scoring; reused by both `track.php` and the `save_track` web service so web and WS cannot diverge ([[DEC-26-02]]). |
-| **Attempts domain** | `classes/local/attempts.php` | Attempt numbering (session-token grouping), upsert of `exelearning_attempt`, aggregation (highest/average/first/last/lowest). | Encapsulates attempt rules and aggregation independent of transport. |
+| **URLs** | `classes/local/urls.php` | Gradebook deep-link / grade-analysis / navigation-before-key builders. | Small URL helpers extracted from `lib.php` ([[DEC-71-01]]). Teacher-only content is no longer hidden by mutating the package: `view.php` appends the package's own `?exe-teacher=1` parameter when `teachermodevisible` is on. |
+| **Tracking domain** | `classes/local/track.php`, `classes/local/tracking_endpoint.php` | `track`: ingest tracking payloads: normalise/clamp scores, route by stable `objectid`, recompute the overall server-side, enforce attempt caps, drive completion. `tracking_endpoint`: build the `js/scorm_tracker.js` config and confirm the sesskey carried in the JSON body (SEC-04). | Single source of truth for scoring; reused by both `track.php` and the `save_track` web service so web and WS cannot diverge ([[DEC-26-02]]). Both halves of the sesskey contract live in one class so the invariant is reviewable in one place. |
+| **Attempts domain** | `classes/local/attempts.php` | Attempt numbering (session-token grouping), upsert of `exelearning_attempt`, aggregation (highest/average/first/last/lowest). Access rules: `can_review()` (learner reviews own attempts per `reviewmode`) and `can_view_user_data()` (enrolment + separate-groups boundary for another user's data). | Encapsulates attempt rules and aggregation independent of transport; the access rules are shared by `view.php`/`report.php` and the attempt/grade web services so web and mobile enforce the same boundary. |
+| **Completion** | `classes/completion/custom_completion.php` | Module-level `completionstatusrequired` rule ([[DEC-69-01]]). | Moodle custom completion API; per-iDevice completion rules were rejected ([[DEC-67-01]]). |
 | **Gradebook mapping** | `classes/grades/gradeitems.php` | `itemnumber_mapping` (0=overall, 1..100=iDevice) for Moodle 5.x completion-by-grade. | Implements a core interface; `strict_types`. |
 | **API boundary** | `classes/external/*` (6 classes) | Web services for the mobile app; each validates context, login and capability. | The published Moodle external contract; fully declared in `db/services.php` ([[DEC-26-02]]). |
 | **Privacy** | `classes/privacy/provider.php` | Declares `exelearning_attempt` metadata + the `core_grades` data flow; export/delete with grade recalculation. | Moodle Privacy API subsystem. |
 | **Backup/Restore** | `backup/moodle2/*` | Export/import instance, grade-item mappings, attempts (gated by `userinfo`), and the `intro`/`package`/`content` file areas; remap user ids. | Moodle Backup/Restore API. |
-| **Events** | `classes/event/*` | `attempt_deleted`, `report_viewed`, `course_module_instance_list_viewed`. | Selective observability ([[DEC-26-03]]); no per-commit event (would be noise). |
+| **Events** | `classes/event/*` | Views: `course_module_viewed`, `course_module_instance_list_viewed`, `report_viewed`. Attempts: `attempt_started`, `attempt_completed` (from `track::ingest()`, [[DEC-68-01]]), `attempt_deleted`. Migration: `migration_started`, `activity_migrated`, `activity_skipped`, `migration_failed`. | Selective observability ([[DEC-26-03]]); no per-commit event (would be noise). |
 | **Global search** | `classes/search/activity.php` | Search area extending `\core_search\base_activity`: indexes the activity `intro` and, via file indexing, the text extracted from the package `content` file area. | Makes eXe content findable in Moodle global search; visibility/context resolved by the base class ([[DEC-70-01]]). |
-| **Editor integration** | `classes/local/embedded_editor_source_resolver.php`, `amd/src/editor_modal.js`, `editor/index.php` | Validate and serve the editor bundled in the release ZIP (`dist/static/`, the only source); `postMessage` open/export bridge; save → re-extract → re-sync. | Embedded-editor-only model ([[DEC-0-09]]); the editor is a release artifact, no runtime installer ([[DEC-106-01]]). |
-| **Entry points** | `view.php`, `track.php`, `grade.php`, `report.php`, `mod_form.php` | View + SCORM shim; tracking endpoint; gradebook deep-link; attempts report; activity form. | Thin controllers; security checks here, scoring logic delegated to `local\*`. |
+| **Editor integration** | `classes/local/embedded_editor_source_resolver.php`, `classes/local/editor_paths.php`, `amd/src/editor_modal.js`, `editor/index.php`, `editor/save.php`, `editor/static.php`, `editor/styles.php` | Validate and serve the editor bundled in the release ZIP (`dist/static/`, the only source); `editor_paths::is_within()` confines the static and styles file routers to their root; `postMessage` open/export bridge; save → `package_manager::save_editor_package()` → re-sync. | Embedded-editor-only model ([[DEC-0-09]]); the editor is a release artifact, no runtime installer ([[DEC-106-01]]). |
+| **Editor styles** | `classes/local/styles_service.php`, `classes/admin/admin_setting_styles{upload,uploaded,builtins}.php`, `admin/styles.php` | Registry of admin-uploaded style ZIPs (validate, install, enable/disable, delete) and built-in theme toggles; theme registry override handed to the editor. | Site-level admin settings; uploaded styles are served by `editor/styles.php`, not from the course file areas. |
+| **Sibling migration** | `classes/local/migration/**`, `admin/migrate.php` | `migration_service` orchestrates preflight and non-destructive migration of `mod_exeweb` / `mod_exescorm` activities; `source/*` reads each sibling read-only behind `source_interface` (`package_probe` detects an ODE 2.0 `content.xml`); `target/activity_builder` creates the target activity, named after the source plus a translated "(migrated)" suffix (`migratedname`) so both can be told apart; `grade/overall_grade_migrator` copies final grades to the overall item; `migration_result` reports per-activity outcomes. | Site-wide admin tool isolated from the activity runtime ([[DEC-13-05]], [[DEC-13-12]]). |
+| **Entry points** | `view.php`, `track.php`, `grade.php`, `report.php`, `index.php`, `mod_form.php`, `settings.php` | View + SCORM shim (runs `package_manager::refresh_runtime()` and `self_heal()` first); tracking endpoint; gradebook deep-link; attempts report; course instance list; activity form; admin settings. | Thin controllers; security checks here, scoring logic delegated to `local\*`. |
 
 ## Request flows
 
@@ -45,8 +48,15 @@ pipeline backs the `save_track` web service. `classes/external` exposes the API 
 `grade_update(..., itemnumber=N, ...)`. The `lib.php` callbacks are thin delegators to
 these `grades\*` / `local\*` classes ([[DEC-71-01]]).
 
+**Authoring (embedded editor):**
+`amd/src/editor_modal.js` (export via `postMessage`) → POST `editor/save.php`
+(`moodle/course:manageactivities`, package lock) → `package_manager::save_editor_package()`
+(stage `package/{revision+1}/` → `store_and_activate_revision()` → extract + transforms,
+then advance the pointer and prune) → `exelearning_sync_grade_items()`. See
+`docs/EMBEDDED_EDITOR.md`.
+
 **Delivery + grading (learner):**
-`view.php` (sandboxed iframe + `window.API` shim) → iDevice JS (pipwerks SCORM 1.2) →
+`view.php` (sandboxed iframe + `window.API` shim, config from `tracking_endpoint`) → iDevice JS (pipwerks SCORM 1.2) →
 POST `track.php` (sesskey confirmed from the JSON body, SEC-04, +
 `require_capability('mod/exelearning:savetrack')`)
 → `local\track::ingest()` (normalise/clamp, objectid routing, server-side overall
@@ -63,7 +73,7 @@ the same tables. See `docs/EXTERNAL_SERVICES.md`.
   scoring/parsing/aggregation live in `classes/local/*` and `classes/grades/*`. `lib.php`
   now holds only the Moodle-mandated callback signatures plus thin delegators to those
   classes — the grade-sync, package, SCORM and URL/UI logic was extracted ([[DEC-71-01]],
-  ~1751 → ~960 lines). `exelearning_supports()` and the lifecycle/`pluginfile` callbacks
+  ~1751 → ~980 lines). `exelearning_supports()` and the lifecycle/`pluginfile` callbacks
   stay because Moodle requires the named functions, not because of domain logic.
 - **One scoring pipeline.** Web and web-service paths converge on `track::ingest()`
   ([[DEC-26-02]]), so a fix or a hardening applies to both.
@@ -77,8 +87,9 @@ the same tables. See `docs/EXTERNAL_SERVICES.md`.
 ## Known, deliberate coupling (technical debt, tracked)
 
 The package HTML is mutated at extraction to inject the SCORM wrapper
-(`local\scorm\scorm_injector`) and hide the teacher-mode toggle
-(`local\ui\teacher_mode_hider`). This couples the plugin to eXeLearning v4
+(`local\scorm\scorm_injector`) and to drop the `body.exe-scorm` save guard
+(`local\scorm\idevice_patch`). The teacher-mode toggle is no longer hidden by injection:
+`view.php` uses the package's own `?exe-teacher=1` parameter. This couples the plugin to eXeLearning v4
 internals. It is recognised as the main debt and has a documented exit:
 serve-time transform ([[DEC-34-02]], deferred) → upstream option ([[DEC-36-01]]). The exit
 via an xAPI channel was tried and retired ([[DEC-122-01]]). The SCORM 1.2 shim in `view.php`
@@ -86,11 +97,16 @@ is **not** debt.
 
 ## Functional classification
 
-`exelearning_supports()` declares `MOD_ARCHETYPE_ASSIGNMENT` + `MOD_PURPOSE_ASSESSMENT`
-(`lib.php:46-67`). These are resolved per **module type**, not per instance, so they do
-not vary with the per-activity `gradeenabled` switch ([[DEC-13-07]]); `gradeenabled = 0`
-is a resource-like mode within an assessment-archetype module. Decision recorded in
-[[DEC-37-01]]; see `docs/AUDIT_FOLLOWUP.md`.
+`exelearning_supports()` keeps the default archetype (`MOD_ARCHETYPE_OTHER`, which the
+4.5 and 5.0 activity chooser needs to list the module under "Activities") and declares
+`MOD_PURPOSE_INTERACTIVECONTENT` as primary purpose and, on Moodle 5.1+,
+`MOD_PURPOSE_ASSESSMENT` as secondary purpose (`FEATURE_MOD_OTHERPURPOSE`, guarded
+with `defined()` because 4.5 and 5.0 lack it). This matches core's own modules for
+interactive content (`mod_h5pactivity`, `mod_lesson`). The purpose only places the
+activity in the chooser: the icon is branded (`exelearning_is_branded()`), so it is
+never tinted. These are resolved per **module type**, not per instance, so they do
+not vary with the per-activity `gradeenabled` switch ([[DEC-13-07]]). Decision
+recorded in [[DEC-159-01]], which supersedes [[DEC-37-01]].
 
 ## Global search
 

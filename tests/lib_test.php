@@ -140,6 +140,38 @@ final class lib_test extends advanced_testcase {
     }
 
     /**
+     * exelearning_apply_instance_defaults(), shared by add and update, fills only
+     * the settings the caller left unset and keeps every submitted value.
+     *
+     * @covers ::exelearning_apply_instance_defaults
+     */
+    public function test_apply_instance_defaults(): void {
+        $data = (object) ['grademax' => 10, 'grademethod' => 1, 'completionstatusrequired' => 2];
+        exelearning_apply_instance_defaults($data);
+
+        // Submitted values survive.
+        $this->assertSame(10, $data->grademax);
+        $this->assertSame(1, $data->grademethod);
+        $this->assertSame(2, $data->completionstatusrequired);
+
+        // Unset ones get the defaults, including a null (disabled) completion rule.
+        $this->assertSame(0, $data->grademin);
+        $this->assertSame(0, $data->gradepass);
+        $this->assertSame(EXELEARNING_GRADEMODEL_PERITEM, $data->grademodel);
+        $this->assertSame(0, $data->maxattempt);
+        $this->assertSame(\mod_exelearning\local\attempts::REVIEW_ALWAYS, $data->reviewmode);
+        $this->assertSame(0, $data->teachermodevisible);
+        $this->assertSame(0, $data->gradecat);
+
+        $empty = new \stdClass();
+        exelearning_apply_instance_defaults($empty);
+        $this->assertSame(100, $empty->grademax);
+        $this->assertSame(\mod_exelearning\local\attempts::GRADE_HIGHEST, $empty->grademethod);
+        $this->assertTrue(property_exists($empty, 'completionstatusrequired'));
+        $this->assertNull($empty->completionstatusrequired);
+    }
+
+    /**
      * A multi-page package registers one grade item per gradable iDevice, keyed by
      * the iDevice's stable objectid, even when those iDevices live on different
      * pages and share the same page-local DOM index (the RIE-007 / DEC-5-01 case).
@@ -469,7 +501,7 @@ final class lib_test extends advanced_testcase {
      * dml_write_exception that aborts add/update and white-screens the view.php
      * self-heal for students (B5, DEC-34-01).
      *
-     * @covers ::exelearning_grade_item_name
+     * @covers \mod_exelearning\grades\grade_item_manager
      */
     public function test_long_grade_item_name_is_clamped(): void {
         global $DB;
@@ -551,7 +583,7 @@ final class lib_test extends advanced_testcase {
      * init-time guard (the `ldata.isScorm` variant) and unrelated files untouched,
      * and is idempotent.
      *
-     * @covers ::exelearning_patch_idevice_save_guards
+     * @covers \mod_exelearning\local\scorm\idevice_patch
      */
     public function test_patch_idevice_save_guards(): void {
         $instance = $this->create_activity();
@@ -581,7 +613,7 @@ final class lib_test extends advanced_testcase {
         $write('/idevices/form/', 'form.js', "a;\n{$formsave}\n  send();\n}\n{$forminit}\n  label();\n}\n");
         $write('/idevices/scrambled-list/', 'scrambled-list.js', "b;\n{$scrsave}\n  send();\n  return;\n}\n");
 
-        exelearning_patch_idevice_save_guards($contextid, $revision);
+        \mod_exelearning\local\scorm\idevice_patch::patch($contextid, $revision);
 
         $form = $read('/idevices/form/', 'form.js');
         $scr  = $read('/idevices/scrambled-list/', 'scrambled-list.js');
@@ -593,7 +625,7 @@ final class lib_test extends advanced_testcase {
         $this->assertStringContainsString($forminit, $form);
 
         // Idempotent: a second run is a no-op (the guard is already gone).
-        exelearning_patch_idevice_save_guards($contextid, $revision);
+        \mod_exelearning\local\scorm\idevice_patch::patch($contextid, $revision);
         $this->assertStringContainsString('if (data.isScorm > 0) {', $read('/idevices/form/', 'form.js'));
     }
 
@@ -603,13 +635,11 @@ final class lib_test extends advanced_testcase {
      * on `body.exe-scorm`. The patch strips the two known offenders (form,
      * scrambled-list); if a future eXeLearning release ships another iDevice with
      * the same coupling — or the patch stops matching — this test fails, telling
-     * the maintainer to add that guard to exelearning_patch_idevice_save_guards().
+     * the maintainer to add that guard to \mod_exelearning\local\scorm\idevice_patch::patch().
      *
      * Coverage is limited to the iDevice types present in the fixture (superelpx,
      * ~30 of the 51 iDevices, including form + scrambled-list); the plugin only
      * ever sees the iDevices an uploaded package actually contains.
-     *
-     * @covers ::exelearning_patch_idevice_save_guards
      */
     public function test_no_idevice_keeps_an_exe_scorm_save_guard(): void {
         $instance = $this->create_activity(
@@ -651,7 +681,7 @@ final class lib_test extends advanced_testcase {
             [],
             $offenders,
             'An iDevice still gates its score-save on body.exe-scorm after extraction. '
-                . 'Add its save guard to exelearning_patch_idevice_save_guards() '
+                . 'Add its save guard to \mod_exelearning\local\scorm\idevice_patch::patch() '
                 . '(issue #13 / DEC-13-11): ' . implode(', ', $offenders)
         );
     }
@@ -717,6 +747,134 @@ final class lib_test extends advanced_testcase {
             $original,
             $DB->get_field('exelearning_grade_item', 'contenthash', ['id' => $target->id])
         );
+    }
+
+    /**
+     * Builds an .elpx on disk whose single page holds one block per iDevice.
+     *
+     * @param array $blocks List of [objectid, idevicetype, blockName or null to omit it].
+     * @return string Absolute path of the .elpx file.
+     */
+    protected function make_titled_package(array $blocks): string {
+        $structures = '';
+        foreach ($blocks as $i => [$objectid, $type, $title]) {
+            $structures .= '<odePagStructure><odePageId>page-1</odePageId>'
+                . '<odeBlockId>block-' . $i . '</odeBlockId>'
+                . ($title === null ? '' : '<blockName>' . htmlspecialchars($title, ENT_XML1) . '</blockName>')
+                . '<odeComponents><odeComponent><odePageId>page-1</odePageId>'
+                . '<odeBlockId>block-' . $i . '</odeBlockId>'
+                . '<odeIdeviceId>' . $objectid . '</odeIdeviceId>'
+                . '<odeIdeviceTypeName>' . $type . '</odeIdeviceTypeName>'
+                . '<jsonProperties>{"isScorm":1}</jsonProperties>'
+                . '</odeComponent></odeComponents></odePagStructure>';
+        }
+        $xml = '<?xml version="1.0" encoding="UTF-8"?>'
+            . '<ode xmlns="http://www.intef.es/xsd/ode" version="2.0"><odeNavStructures><odeNavStructure>'
+            . '<odePageId>page-1</odePageId><pageName>Page 1</pageName>'
+            . '<odePagStructures>' . $structures . '</odePagStructures>'
+            . '</odeNavStructure></odeNavStructures></ode>';
+        $stage = make_request_directory();
+        file_put_contents($stage . '/content.xml', $xml);
+        file_put_contents($stage . '/index.html', '<html><body></body></html>');
+        $path = make_request_directory() . '/titled.elpx';
+        get_file_packer('application/zip')->archive_to_pathname(
+            ['content.xml' => $stage . '/content.xml', 'index.html' => $stage . '/index.html'],
+            $path
+        );
+        return $path;
+    }
+
+    /**
+     * Returns the activity's per-iDevice gradebook column names keyed by itemnumber.
+     *
+     * @param \stdClass $instance The exelearning instance.
+     * @return array itemnumber => grade item name.
+     */
+    protected function gradebook_column_names(\stdClass $instance): array {
+        global $DB;
+        return $DB->get_records_menu('grade_items', [
+            'itemmodule' => 'exelearning',
+            'iteminstance' => $instance->id,
+        ], 'itemnumber ASC', 'itemnumber, itemname');
+    }
+
+    /**
+     * Per-iDevice gradebook columns are named after the title the author gave each
+     * iDevice, not its internal type (exelearning issue 2459). Columns that would
+     * still share a label on the same page (same title, or no title and same type)
+     * get their stable itemnumber, and an iDevice with no usable title falls back to
+     * its translated type name.
+     */
+    public function test_grade_item_names_use_authored_idevice_titles(): void {
+        $path = $this->make_titled_package([
+            ['idevice-tf-1', 'trueorfalse', 'Verdadero o falso'],
+            ['idevice-tf-2', 'trueorfalse', 'Actividad: crucigrama (conceptos & evidencias)'],
+            ['idevice-guess-1', 'guess', 'Same title'],
+            ['idevice-guess-2', 'guess', 'Same title'],
+            ['idevice-form-1', 'form', null],
+            ['idevice-form-2', 'form', '   '],
+        ]);
+
+        $instance = $this->create_activity([
+            'name' => 'Unit',
+            'packagefilepath' => $path,
+            'grademodel' => EXELEARNING_GRADEMODEL_PERITEM,
+        ]);
+
+        $this->assertSame([
+            1 => 'Unit · Page 1 · Verdadero o falso',
+            2 => 'Unit · Page 1 · Actividad: crucigrama (conceptos & evidencias)',
+            3 => 'Unit · Page 1 · #3 Same title',
+            4 => 'Unit · Page 1 · #4 Same title',
+            5 => 'Unit · Page 1 · #5 Form',
+            6 => 'Unit · Page 1 · #6 Form',
+        ], $this->gradebook_column_names($instance));
+    }
+
+    /**
+     * Renaming an iDevice only renames its column: the itemnumber, the objectid
+     * mapping and the Moodle grade item (with its grades) stay the same, and the
+     * rename is not reported as a scoring change.
+     */
+    public function test_renaming_idevice_title_keeps_grade_item_identity(): void {
+        global $DB;
+        $instance = $this->create_activity([
+            'name' => 'Unit',
+            'packagefilepath' => $this->make_titled_package([
+                ['idevice-tf-1', 'trueorfalse', 'First title'],
+                ['idevice-guess-1', 'guess', 'Guess it'],
+            ]),
+            'grademodel' => EXELEARNING_GRADEMODEL_PERITEM,
+        ]);
+        $cm = get_coursemodule_from_instance('exelearning', $instance->id);
+        $context = \context_module::instance($cm->id);
+        $before = $DB->get_records_menu('exelearning_grade_item', ['exelearningid' => $instance->id], '', 'objectid, itemnumber');
+        $gradeitemids = $DB->get_records_menu('grade_items', [
+            'itemmodule' => 'exelearning', 'iteminstance' => $instance->id,
+        ], '', 'itemnumber, id');
+
+        $fs = get_file_storage();
+        $fs->delete_area_files($context->id, 'mod_exelearning', 'package');
+        $fs->create_file_from_pathname([
+            'contextid' => $context->id, 'component' => 'mod_exelearning', 'filearea' => 'package',
+            'itemid' => 0, 'filepath' => '/', 'filename' => 'titled.elpx',
+        ], $this->make_titled_package([
+            ['idevice-tf-1', 'trueorfalse', 'Renamed title'],
+            ['idevice-guess-1', 'guess', 'Guess it'],
+        ]));
+        $delta = exelearning_sync_grade_items($instance->id, $context->id);
+
+        $this->assertSame(['added' => 0, 'removed' => 0, 'changed' => 0, 'capped' => 0], $delta);
+        $this->assertEquals(
+            $before,
+            $DB->get_records_menu('exelearning_grade_item', ['exelearningid' => $instance->id], '', 'objectid, itemnumber')
+        );
+        $this->assertEquals($gradeitemids, $DB->get_records_menu('grade_items', [
+            'itemmodule' => 'exelearning', 'iteminstance' => $instance->id,
+        ], '', 'itemnumber, id'));
+        $names = $this->gradebook_column_names($instance);
+        $this->assertSame('Unit · Page 1 · Renamed title', $names[$before['idevice-tf-1']]);
+        $this->assertSame('Unit · Page 1 · Guess it', $names[$before['idevice-guess-1']]);
     }
 
     /**
@@ -853,7 +1011,7 @@ final class lib_test extends advanced_testcase {
     }
 
     /**
-     * Gradebook deep-link (issue #13 #4, DEC-13-02): exelearning_grade_item_view_url()
+     * Gradebook deep-link (issue #13 #4, DEC-13-02): \mod_exelearning\local\urls::grade_item_view_url()
      * maps an itemnumber to its iDevice objectid so grade.php can forward the click
      * straight to that iDevice; itemnumber 0 and unknown numbers fall back to the
      * activity front page.
@@ -865,7 +1023,7 @@ final class lib_test extends advanced_testcase {
         $cm = get_coursemodule_from_instance('exelearning', $instance->id);
 
         // The overall grade (itemnumber 0) links to the front page, no deep link.
-        $overall = exelearning_grade_item_view_url($instance, (int) $cm->id, 0);
+        $overall = \mod_exelearning\local\urls::grade_item_view_url($instance, (int) $cm->id, 0);
         $this->assertArrayNotHasKey('idevice', $overall->params());
         $this->assertSame((string) $cm->id, (string) $overall->params()['id']);
 
@@ -876,11 +1034,11 @@ final class lib_test extends advanced_testcase {
             'deleted'       => 0,
         ]);
         $this->assertNotEmpty($objectid);
-        $deeplink = exelearning_grade_item_view_url($instance, (int) $cm->id, 1);
+        $deeplink = \mod_exelearning\local\urls::grade_item_view_url($instance, (int) $cm->id, 1);
         $this->assertSame($objectid, $deeplink->params()['idevice']);
 
         // An unknown itemnumber degrades gracefully to the front page.
-        $unknown = exelearning_grade_item_view_url($instance, (int) $cm->id, 99);
+        $unknown = \mod_exelearning\local\urls::grade_item_view_url($instance, (int) $cm->id, 99);
         $this->assertArrayNotHasKey('idevice', $unknown->params());
     }
 

@@ -240,6 +240,15 @@ if ($download !== '' && $attempts) {
             'timemodified' => userdate($a->timemodified),
         ];
     }
+    // Spreadsheet formats: neutralise formula-like cells (CSV injection, SEC-008). Newer
+    // core builds do this in the spout writers, but not every supported Moodle 4.5
+    // release does; the prefixed value is left untouched by core, so it never doubles.
+    if (in_array($download, ['csv', 'excel', 'ods'], true)) {
+        foreach ($exportrows as &$exportrow) {
+            $exportrow = array_map([\mod_exelearning\local\attempts::class, 'neutralise_spreadsheet_cell'], $exportrow);
+        }
+        unset($exportrow);
+    }
     \core\dataformat::download_data(
         clean_filename($exelearning->name . '_attempts'),
         $download,
@@ -261,9 +270,9 @@ echo $OUTPUT->header();
 echo $OUTPUT->heading(get_string('attemptsreport', 'mod_exelearning'));
 
 // When deep-linked from a specific grade ("grade analysis"), show whose attempts
-// these are. Guarded by the group restriction so an out-of-group student's name
-// is not revealed.
-if ($userid > 0 && ($restrictusers === null || in_array($userid, $restrictusers, true))) {
+// these are. Only for users the teacher may see (enrolled and, in separate groups,
+// in one of their groups), so an arbitrary userid does not reveal a name (SEC-009).
+if ($userid > 0 && \mod_exelearning\local\attempts::can_view_user_data($cm, $context, $userid)) {
     $filtereduser = $DB->get_record('user', ['id' => $userid]);
     if ($filtereduser) {
         // Escape the name: $OUTPUT->heading() does not HTML-escape its content, and a

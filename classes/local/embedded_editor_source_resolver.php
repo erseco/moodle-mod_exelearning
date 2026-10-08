@@ -123,4 +123,30 @@ class embedded_editor_source_resolver {
         $dir = self::get_editor_dir();
         return ($dir !== null) ? $dir . '/index.html' : null;
     }
+
+    /**
+     * Map a Moodle language code to a UI locale shipped by the bundled editor.
+     *
+     * Editor locales are bare language codes (ca, es, eu, gl, pt, va...), so
+     * Moodle's regional variants map to their base language (es_mx -> es,
+     * pt_br -> pt, en_us -> en) and Moodle's Valencian pack maps to the
+     * editor's own Valencian locale (ca_valencia -> va). A locale counts as
+     * shipped when the bundle carries its app/common/i18n/common_i18n.{code}.js
+     * file: the editor build generates those from the same locale list as its
+     * UI translations, so a language added to the editor needs no change here.
+     *
+     * @param string $lang Moodle language code, e.g. from current_language().
+     * @return string|null Editor locale, or null when the bundled editor does
+     *                     not ship it or no editor is available.
+     */
+    public static function get_editor_locale(string $lang): ?string {
+        $code = ($lang === 'ca_valencia') ? 'va' : explode('_', $lang)[0];
+        $dir = self::get_editor_dir();
+        // The code becomes part of a filesystem path here and is emitted into the
+        // editor's JavaScript by editor/index.php: accept bare language codes only.
+        if ($dir === null || !preg_match('/^[a-z]{2,3}$/', $code)) {
+            return null;
+        }
+        return is_file($dir . '/app/common/i18n/common_i18n.' . $code . '.js') ? $code : null;
+    }
 }

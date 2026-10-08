@@ -41,6 +41,17 @@ implements `core_grades\local\gradeitem\itemnumber_mapping` in `classes/grades/g
 Course-overview column labelling break. Registration stops at the cap — beyond 100 gradable iDevices the extra
 items are not registered as columns (`\mod_exelearning\grades\grade_sync::sync()`), with a developer-level `debugging()` warning.
 
+### Column names
+
+A per-iDevice column is named `activity · page · title`, where the title is the one the author gave the
+iDevice (`blockName` of its block in `content.xml`). An iDevice with no title falls back to its translated
+type name (`idevicetype:<slug>` strings, e.g. "True or false", "Guess"; the same names the eXeLearning editor
+shows), in the course's forced language or else the site language, so a re-sync by another user never renames
+the column. Unknown types keep their slug (`\mod_exelearning\local\idevice_types`). The teacher's "Gradable
+iDevices detected" summary on the activity page uses the same names in the viewer's language. When two columns on the same page would share a label, both get their stable
+itemnumber (`#3 Quiz`, `#4 Quiz`). The name is display-only: renaming an iDevice renames its column on the next
+sync and never changes its objectid, itemnumber or grades (`grade_item_manager::format_name()`).
+
 ## objectid-stable routing (DEC-5-01)
 
 Grade items are keyed by the package's stable `objectid` (the `<odeIdeviceId>` from `content.xml`), **not** by the
@@ -152,7 +163,7 @@ History recorded while the activity **was** graded is untouched by all of this: 
 **Caveat**: `FEATURE_GRADE_HAS_GRADE` is **static** — `exelearning_supports()` returns `true` unconditionally
 (`lib.php:66-67`), regardless of `gradeenabled`. So Moodle still classifies the activity type as gradable even when a
 given instance is not. This functional classification mismatch is tracked in the audit follow-up — see the new ADR
-**DEC-37-01** (functional classification) and `docs/AUDIT_FOLLOWUP.md`.
+**DEC-37-01**, superseded by **DEC-159-01** (functional classification), and `docs/AUDIT_FOLLOWUP.md`.
 
 ## Worked example
 
@@ -189,4 +200,4 @@ The Grading and Attempts sections of the activity form (`mod_form.php:78-227`), 
   for the single-channel SCORM 1.2 pipeline).
 - `docs/PRIVACY_BACKUP_FILES.md` — backup/restore of `exelearning_grade_item` and attempt data
   (`backup/moodle2/backup_exelearning_stepslib.php`).
-- `research/decisiones/adr/` — DEC-0-08, DEC-0-10, DEC-5-01, DEC-12-01, DEC-13-07, DEC-25-01, DEC-37-01, DEC-69-01.
+- `research/decisiones/adr/` — DEC-0-08, DEC-0-10, DEC-5-01, DEC-12-01, DEC-13-07, DEC-25-01, DEC-37-01, DEC-69-01, DEC-159-01.

@@ -75,60 +75,15 @@ if ($showeditorbutton) {
     $PAGE->requires->js_call_amd('mod_exelearning/editor_modal', 'init', []);
 }
 
-$fs = get_file_storage();
 \mod_exelearning\local\package_manager::refresh_runtime($context->id, $exelearning);
-$mainfile = $fs->get_file(
-    $context->id,
-    'mod_exelearning',
-    'content',
-    (int) $exelearning->revision,
-    '/',
-    'index.html'
-);
+// Self-heal for programmatic uploads (e.g. the Moodle Playground `addModule`) that
+// stored the ELPX without extracting it or scanning its grade items. It only acts
+// when something is missing and runs under the package lock; null means no content.
+$mainfile = \mod_exelearning\local\package_manager::self_heal($context->id, $exelearning);
 
-// Self-heal for programmatic uploads (e.g. the Moodle Playground `addModule`):
-// if the ELPX is in the 'package' filearea but the content was not extracted or
-// the grade items were not detected (because that path bypassed
-// exelearning_add_instance), recover here. Idempotent: only acts when something
-// is missing, so it does not penalise the normal view.
-$haspackage = (exelearning_get_stored_package($context->id) !== null);
-if ($haspackage) {
-    if (!$mainfile) {
-        exelearning_extract_stored_package($context->id, (int) $exelearning->revision);
-        $mainfile = $fs->get_file(
-            $context->id,
-            'mod_exelearning',
-            'content',
-            (int) $exelearning->revision,
-            '/',
-            'index.html'
-        );
-    }
-    // Self-heal grade-item detection, but only when this package revision has
-    // not been scanned yet (gradesyncrev marker). This used to fire whenever the
-    // activity had no gradable grade item, which for a content-only package
-    // (0 gradable iDevices) is PERMANENTLY true and re-extracted + re-parsed the
-    // entire ELPX on every single view — a self-inflicted DoS on the most common
-    // package type. exelearning_sync_grade_items() stamps max(revision, 1) once
-    // it has scanned, so each revision is scanned at most once;
-    // exelearning_update_instance() bumps revision to re-arm a scan when the
-    // content changes.
-    $synctarget = max((int) $exelearning->revision, 1);
-    if ((int) $exelearning->gradesyncrev < $synctarget) {
-        exelearning_sync_grade_items($exelearning->id, $context->id);
-    }
-}
-
+// The activity header rendered by header() already shows the activity name and
+// description on every supported Moodle version, so they are not printed again.
 echo $OUTPUT->header();
-echo $OUTPUT->heading(format_string($exelearning->name));
-
-if (!empty($exelearning->intro)) {
-    echo $OUTPUT->box(
-        format_module_intro('exelearning', $exelearning, $cm->id),
-        'generalbox',
-        'intro'
-    );
-}
 
 // Preview mode banner + toggle links (DEC-0-06).
 if ($showpreviewtoggle) {
@@ -218,6 +173,12 @@ if (!$mainfile) {
         );
     }
 } else {
+    // An eXeLearning SCORM/IMS export has no website menu until it is saved from the
+    // editor (exelearning issue 2477): tell whoever can do that.
+    $lmsexportwarning = exelearning_lms_export_warning($exelearning, $context);
+    if ($lmsexportwarning !== null) {
+        echo $OUTPUT->notification($lmsexportwarning, \core\output\notification::NOTIFY_WARNING);
+    }
     $iframeurl = moodle_url::make_pluginfile_url(
         $context->id,
         'mod_exelearning',
@@ -253,11 +214,8 @@ if (!$mainfile) {
     if ($exelearning->gradeenabled && has_capability('mod/exelearning:viewreport', $context) && !empty($items)) {
         echo html_writer::start_div('alert alert-info mb-3');
         echo html_writer::tag('strong', get_string('detecteditems', 'mod_exelearning')) . ' ';
-        $labels = [];
-        foreach ($items as $it) {
-            $labels[] = '#' . $it->itemnumber . ' ' . s($it->idevicetype);
-        }
-        echo s(implode(' · ', $labels));
+        // Translated iDevice names, not content.xml type slugs (PR 163 review).
+        echo \mod_exelearning\local\idevice_types::detected_items_summary($items);
         echo html_writer::end_div();
     }
     // Participation summary + report link (DEC-0-11 option B, Assignment-style):
@@ -364,21 +322,8 @@ if (!$mainfile) {
             echo html_writer::div($label, $class);
         }
         // Review of previous attempts, according to reviewmode.
-        $reviewmode = (int) ($exelearning->reviewmode
-                ?? \mod_exelearning\local\attempts::REVIEW_ALWAYS);
-        $iscomplete = false;
-        $cinfo = new completion_info($course);
-        if ($cinfo->is_enabled($cm)) {
-            $cdata = $cinfo->get_data($cm, false, $USER->id);
-            $iscomplete = in_array(
-                (int) $cdata->completionstate,
-                [COMPLETION_COMPLETE, COMPLETION_COMPLETE_PASS],
-                true
-            );
-        }
-        $canreview = ($reviewmode === \mod_exelearning\local\attempts::REVIEW_ALWAYS)
-                || ($reviewmode === \mod_exelearning\local\attempts::REVIEW_AFTERCOMPLETION
-                        && $iscomplete);
+        // Shared with the get_user_attempts web service (SEC-002).
+        $canreview = \mod_exelearning\local\attempts::can_review($exelearning, $cm, $course, (int) $USER->id);
         if ($canreview && $used > 0) {
             $list = [];
             foreach ($myattempts as $ma) {
@@ -449,6 +394,11 @@ if (!$mainfile) {
     // allow-popups: interactive-video, hidden-image, etc.
     // allow-forms: quick-questions, form, scrambled-list, etc.
     // allow-popups-to-escape-sandbox: popups load without restrictions.
+    // allow-downloads: <a download> links and the download-source-file iDevice's
+    // "Download .elpx" button, which rebuilds the package in the browser and saves it.
+    // Without it Chrome/Firefox silently drop every download the frame starts
+    // (exelearning/exelearning#2488). Same-origin script can already trigger
+    // downloads through the parent, so this grants no new capability.
     // Explicitly BLOCKED (not included):
     // allow-top-navigation: a malicious package must not change the parent URL.
     // allow-modals: no alert/confirm/prompt, they are UX interruptions.
@@ -460,7 +410,7 @@ if (!$mainfile) {
         'width'  => '100%',
         'height' => '650',
         'allow'  => 'fullscreen',
-        'sandbox' => 'allow-scripts allow-same-origin allow-popups allow-forms allow-popups-to-escape-sandbox',
+        'sandbox' => 'allow-scripts allow-same-origin allow-popups allow-forms allow-popups-to-escape-sandbox allow-downloads',
         'style'  => 'border: 1px solid var(--bs-border-color, #dee2e6); border-radius: .5rem;',
     ]);
 

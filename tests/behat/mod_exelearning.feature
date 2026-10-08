@@ -32,6 +32,23 @@ Feature: View a mod_exelearning activity and its attempts report
     And I should see "Gradable iDevices detected:"
     And I should see "View attempts report"
 
+  # Moodle's activity header already renders the activity name and description on
+  # every supported version (4.5+); the view page must not print them a second time.
+  Scenario Outline: The activity name and description are rendered only once
+    Given the following "activities" exist:
+      | activity    | name         | intro                    | course | idnumber |
+      | exelearning | Titled unit  | Unit description to spot | C1     | exe2     |
+    When I am on the "Titled unit" "exelearning activity" page logged in as <user>
+    Then I should see "Titled unit"
+    And I should see "Unit description to spot"
+    And "(//*[self::h1 or self::h2 or self::h3][normalize-space(.)='Titled unit'])[2]" "xpath_element" should not exist
+    And "(//*[normalize-space(text())='Unit description to spot'])[2]" "xpath_element" should not exist
+
+    Examples:
+      | user     |
+      | teacher1 |
+      | student1 |
+
   Scenario: A teacher opens the attempts report and sees the empty-state message
     Given I am on the "Evaluable unit" "exelearning activity" page logged in as teacher1
     When I follow "View attempts report"
@@ -56,8 +73,8 @@ Feature: View a mod_exelearning activity and its attempts report
       | exelearning | Multi-page unit | C1     | exemp    | research/fixtures/elpx/multipage-gradable.elpx |
     And I am on the "Multi-page unit" "exelearning activity" page logged in as teacher1
     Then I should see "Gradable iDevices detected:"
-    And I should see "#1 trueorfalse"
-    And I should see "#2 guess"
+    And I should see "#1 True or false"
+    And I should see "#2 Guess"
 
   # Browser-level bridge coverage for DEC-5-01 belongs in manual/Playwright e2e:
   # under moodle-plugin-ci the JS driver can enter the scenario with Moodle core JS
@@ -164,6 +181,19 @@ Feature: View a mod_exelearning activity and its attempts report
       | exelearning | Teacher noreveal | C1     | exetn    | 0                  |
     And I am on the "Teacher noreveal" "exelearning activity" page logged in as teacher1
     Then the "src" attribute of "iframe#exelearningobject" "css_element" should not contain "exe-teacher"
+
+  # The package's own download links, including the download-source-file iDevice's
+  # "Download .elpx" button, need allow-downloads or the browser drops the file
+  # (exelearning/exelearning#2488). The attribute is server-rendered, so the non-JS
+  # driver asserts on it directly.
+  Scenario: The package iframe lets the package download files
+    Given the following "activities" exist:
+      | activity    | name           | course | idnumber |
+      | exelearning | Download frame | C1     | exedl    |
+    And I am on the "Download frame" "exelearning activity" page logged in as student1
+    Then the "sandbox" attribute of "iframe#exelearningobject" "css_element" should contain "allow-downloads"
+    And the "sandbox" attribute of "iframe#exelearningobject" "css_element" should not contain "allow-top-navigation"
+    And the "sandbox" attribute of "iframe#exelearningobject" "css_element" should not contain "allow-modals"
 
   Scenario: A student also sees the exe-teacher parameter when the setting is on
     Given the following "activities" exist:

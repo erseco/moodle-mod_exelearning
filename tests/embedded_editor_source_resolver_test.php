@@ -154,4 +154,77 @@ final class embedded_editor_source_resolver_test extends advanced_testcase {
 
         remove_dir($staledir);
     }
+
+    /**
+     * Point the resolver at a valid editor that ships the given UI locales.
+     *
+     * @param string[] $locales Editor locale codes to ship i18n files for.
+     * @return void
+     */
+    private function use_editor_with_locales(array $locales): void {
+        $dir = make_temp_directory('mod_exelearning/resolver-' . uniqid()) . '/static';
+        $this->make_valid_editor($dir);
+        make_writable_directory($dir . '/app/common/i18n');
+        foreach ($locales as $locale) {
+            file_put_contents($dir . '/app/common/i18n/common_i18n.' . $locale . '.js', '');
+        }
+        $this->override_bundled_dir($dir);
+    }
+
+    /**
+     * Moodle languages map to the shipped editor locale, regional variants to
+     * their base language and ca_valencia to the editor's Valencian locale.
+     */
+    public function test_get_editor_locale_maps_moodle_languages(): void {
+        $this->resetAfterTest();
+        $this->use_editor_with_locales(['ca', 'en', 'es', 'eu', 'gl', 'pt', 'va']);
+
+        $this->assertSame('es', resolver::get_editor_locale('es'));
+        $this->assertSame('eu', resolver::get_editor_locale('eu'));
+        $this->assertSame('es', resolver::get_editor_locale('es_mx'));
+        $this->assertSame('pt', resolver::get_editor_locale('pt_br'));
+        $this->assertSame('en', resolver::get_editor_locale('en_us'));
+        $this->assertSame('ca', resolver::get_editor_locale('ca'));
+        $this->assertSame('va', resolver::get_editor_locale('ca_valencia'));
+    }
+
+    /**
+     * Languages the bundled editor does not ship yield null so the editor keeps
+     * its own default.
+     */
+    public function test_get_editor_locale_returns_null_for_unshipped_language(): void {
+        $this->resetAfterTest();
+        $this->use_editor_with_locales(['en', 'es']);
+
+        $this->assertNull(resolver::get_editor_locale('fr'));
+        $this->assertNull(resolver::get_editor_locale('zh_cn'));
+        $this->assertNull(resolver::get_editor_locale('ca_valencia'));
+    }
+
+    /**
+     * Codes that are not bare lowercase language codes never reach the
+     * filesystem check or the editor's JavaScript.
+     */
+    public function test_get_editor_locale_rejects_malformed_codes(): void {
+        $this->resetAfterTest();
+        $this->use_editor_with_locales(['en', 'es']);
+
+        $this->assertNull(resolver::get_editor_locale(''));
+        $this->assertNull(resolver::get_editor_locale('ES'));
+        $this->assertNull(resolver::get_editor_locale('../es'));
+        $this->assertNull(resolver::get_editor_locale('es"</script>'));
+        $this->assertNull(resolver::get_editor_locale('es/../../en'));
+    }
+
+    /**
+     * Without a usable bundled editor there is no editor locale.
+     */
+    public function test_get_editor_locale_without_editor_is_null(): void {
+        $this->resetAfterTest();
+        $this->override_bundled_dir(
+            make_temp_directory('mod_exelearning/resolver-' . uniqid()) . '/missing'
+        );
+
+        $this->assertNull(resolver::get_editor_locale('es'));
+    }
 }

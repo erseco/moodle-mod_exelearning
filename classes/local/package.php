@@ -107,6 +107,8 @@ class package {
      *   - idevicetype string Slug (trueorfalse, guess, …).
      *   - pageid      string Stable ID of the owning page.
      *   - pagename    string Page name (best-effort, may be empty).
+     *   - title       string Title the author gave the iDevice (its block's
+     *                        blockName); empty when the package has none.
      *   - orderhint   int    Order of appearance in the document (0-based).
      *   - contenthash string sha1 of the iDevice content block (detects an
      *                        in-place options edit; same objectid, new scoring).
@@ -249,12 +251,36 @@ class package {
                 'idevicetype' => $type,
                 'pageid'      => $page,
                 'pagename'    => $pagenames[$page] ?? '',
+                'title'       => $this->block_title($idnode),
                 'orderhint'   => $order++,
                 'contenthash' => $this->hash_idevice_block($blockxml),
             ];
         }
 
         return $items;
+    }
+
+    /**
+     * Returns the title the author gave an iDevice: the `blockName` of the
+     * `odePagStructure` block that contains it. The flat `odeNavStructure`
+     * serialisation has no blocks, so it yields an empty title.
+     *
+     * @param \DOMNode $idnode The `odeIdeviceId` element.
+     * @return string The trimmed, entity-decoded title, or '' when there is none.
+     */
+    private function block_title(\DOMNode $idnode): string {
+        for ($node = $idnode->parentNode; $node instanceof \DOMElement; $node = $node->parentNode) {
+            if ($node->localName !== 'odePagStructure') {
+                continue;
+            }
+            foreach ($node->childNodes as $child) {
+                if ($child instanceof \DOMElement && $child->localName === 'blockName') {
+                    return trim($child->textContent);
+                }
+            }
+            return '';
+        }
+        return '';
     }
 
     /**
@@ -523,6 +549,9 @@ class package {
                     'idevicetype' => $devtype,
                     'pageid'      => $currentpage,
                     'pagename'    => $pagenames[$currentpage] ?? '',
+                    // Best-effort scan of malformed XML: no block title, so callers
+                    // fall back to the iDevice type.
+                    'title'       => '',
                     'orderhint'   => $order++,
                     'contenthash' => $this->hash_idevice_block($block),
                 ];
@@ -570,14 +599,13 @@ class package {
      * @return string|null File contents, or null if not found.
      */
     private function read_content_xml(): ?string {
-        $packer = get_file_packer('application/zip');
         $tmpdir = make_request_directory();
-        $extracted = $this->file->extract_to_pathname(
-            $packer,
-            $tmpdir,
-            null,
-            true
-        );
+        // Extract ONLY content.xml, not the whole archive (media included) on every
+        // scan. The packer drops the $onlyfiles filter when handed a stored_file, so
+        // copy the archive out first and extract from the path (same as package_probe).
+        $ziptmp = $tmpdir . '/package.zip';
+        $this->file->copy_content_to($ziptmp);
+        $extracted = get_file_packer('application/zip')->extract_to_pathname($ziptmp, $tmpdir, ['content.xml']);
         if (!is_array($extracted)) {
             return null;
         }

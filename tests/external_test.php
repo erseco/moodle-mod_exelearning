@@ -252,6 +252,176 @@ final class external_test extends advanced_testcase {
         get_user_grades::execute($this->instance->id, $this->other->id);
     }
 
+    /**
+     * Put the activity in separate groups: the teacher and the student share group A,
+     * the other student is in group B, and the teacher loses accessallgroups.
+     */
+    protected function setup_separate_groups(): void {
+        global $DB;
+        $cm = get_coursemodule_from_instance('exelearning', $this->instance->id, 0, false, MUST_EXIST);
+        $DB->set_field('course_modules', 'groupmode', SEPARATEGROUPS, ['id' => $cm->id]);
+        rebuild_course_cache($this->course->id, true);
+
+        $gen = $this->getDataGenerator();
+        $groupa = $gen->create_group(['courseid' => $this->course->id]);
+        $groupb = $gen->create_group(['courseid' => $this->course->id]);
+        $gen->create_group_member(['groupid' => $groupa->id, 'userid' => $this->teacher->id]);
+        $gen->create_group_member(['groupid' => $groupa->id, 'userid' => $this->student->id]);
+        $gen->create_group_member(['groupid' => $groupb->id, 'userid' => $this->other->id]);
+
+        $roleid = $DB->get_field('role', 'id', ['shortname' => 'editingteacher'], MUST_EXIST);
+        assign_capability(
+            'moodle/site:accessallgroups',
+            CAP_PROHIBIT,
+            $roleid,
+            \context_course::instance($this->course->id)->id,
+            true
+        );
+    }
+
+    /**
+     * SEC-001: in separate groups, viewreport alone does not reach users outside the
+     * teacher's groups, through either service.
+     */
+    public function test_services_deny_other_group_in_separate_groups(): void {
+        $this->setup_separate_groups();
+        $this->record_overall_attempt($this->other->id, 1, 0.5, 'completed');
+        $this->setUser($this->teacher);
+
+        foreach ([get_user_attempts::class, get_user_grades::class] as $service) {
+            try {
+                $service::execute($this->instance->id, $this->other->id);
+                $this->fail("Expected $service to refuse an out-of-group user");
+            } catch (\moodle_exception $e) {
+                $this->assertSame('usernotvisible', $e->errorcode);
+            }
+        }
+    }
+
+    /**
+     * SEC-001: a same-group user stays readable in separate groups.
+     */
+    public function test_services_allow_same_group_in_separate_groups(): void {
+        $this->setup_separate_groups();
+        $this->record_overall_attempt($this->student->id, 1, 0.5, 'completed');
+        $this->setUser($this->teacher);
+
+        $result = get_user_attempts::execute($this->instance->id, $this->student->id);
+        $result = external_api::clean_returnvalue(get_user_attempts::execute_returns(), $result);
+        $this->assertCount(1, $result['attempts']);
+
+        $result = get_user_grades::execute($this->instance->id, $this->student->id);
+        external_api::clean_returnvalue(get_user_grades::execute_returns(), $result);
+    }
+
+    /**
+     * SEC-001: moodle/site:accessallgroups lifts the group boundary.
+     */
+    public function test_services_allow_other_group_with_accessallgroups(): void {
+        $this->setup_separate_groups();
+        $this->record_overall_attempt($this->other->id, 1, 0.5, 'completed');
+        $manager = $this->getDataGenerator()->create_user();
+        $this->getDataGenerator()->enrol_user($manager->id, $this->course->id, 'manager');
+        $this->setUser($manager);
+
+        $result = get_user_attempts::execute($this->instance->id, $this->other->id);
+        $result = external_api::clean_returnvalue(get_user_attempts::execute_returns(), $result);
+        $this->assertCount(1, $result['attempts']);
+    }
+
+    /**
+     * SEC-001: a user not enrolled in the course is never reachable, even without groups.
+     */
+    public function test_services_deny_unenrolled_user(): void {
+        $outsider = $this->getDataGenerator()->create_user();
+        $this->setUser($this->teacher);
+
+        $this->expectException(\moodle_exception::class);
+        $this->expectExceptionMessage(get_string('usernotvisible', 'mod_exelearning'));
+        get_user_attempts::execute($this->instance->id, $outsider->id);
+    }
+
+    /**
+     * SEC-002: with reviewmode = never the learner gets no attempt history (only the
+     * counters and a warning), while a teacher still reads it.
+     */
+    public function test_get_user_attempts_honours_reviewmode_none(): void {
+        global $DB;
+        $DB->set_field('exelearning', 'reviewmode', \mod_exelearning\local\attempts::REVIEW_NONE, [
+            'id' => $this->instance->id,
+        ]);
+        $this->record_overall_attempt($this->student->id, 1, 0.75, 'completed');
+
+        $this->setUser($this->student);
+        $result = get_user_attempts::execute($this->instance->id);
+        $result = external_api::clean_returnvalue(get_user_attempts::execute_returns(), $result);
+        $this->assertSame([], $result['attempts']);
+        $this->assertSame(1, $result['usedattempts']);
+        $this->assertSame('reviewnotallowed', $result['warnings'][0]['warningcode']);
+
+        $this->setUser($this->teacher);
+        $result = get_user_attempts::execute($this->instance->id, $this->student->id);
+        $result = external_api::clean_returnvalue(get_user_attempts::execute_returns(), $result);
+        $this->assertCount(1, $result['attempts']);
+        $this->assertSame([], $result['warnings']);
+    }
+
+    /**
+     * SEC-002: after-completion review without completion enabled never opens, as on view.php.
+     */
+    public function test_can_review_after_completion_needs_completion(): void {
+        $cm = get_coursemodule_from_instance('exelearning', $this->instance->id, 0, false, MUST_EXIST);
+        $instance = (object) ['reviewmode' => \mod_exelearning\local\attempts::REVIEW_AFTERCOMPLETION];
+        $this->assertFalse(\mod_exelearning\local\attempts::can_review($instance, $cm, $this->course, $this->student->id));
+        $instance->reviewmode = \mod_exelearning\local\attempts::REVIEW_ALWAYS;
+        $this->assertTrue(\mod_exelearning\local\attempts::can_review($instance, $cm, $this->course, $this->student->id));
+    }
+
+    /**
+     * SPEC-01: a hidden grade item returns no value to the learner, but does to a teacher.
+     */
+    public function test_get_user_grades_hides_hidden_grades(): void {
+        $this->setUser($this->student);
+        $this->save_two_item_scores(80.0, 40.0);
+        $item = \grade_item::fetch([
+            'itemtype' => 'mod', 'itemmodule' => 'exelearning',
+            'iteminstance' => $this->instance->id, 'itemnumber' => 1,
+            'courseid' => $this->course->id,
+        ]);
+        $item->set_hidden(1);
+
+        $byitem = function (array $result): array {
+            $out = [];
+            foreach ($result['grades'] as $g) {
+                $out[$g['itemnumber']] = $g;
+            }
+            return $out;
+        };
+
+        $result = get_user_grades::execute($this->instance->id);
+        $grades = $byitem(external_api::clean_returnvalue(get_user_grades::execute_returns(), $result));
+        $this->assertArrayNotHasKey('grade', $grades[1]);
+        $this->assertEqualsWithDelta(40.0, $grades[2]['grade'], 0.0001);
+
+        $this->setUser($this->teacher);
+        $result = get_user_grades::execute($this->instance->id, $this->student->id);
+        $grades = $byitem(external_api::clean_returnvalue(get_user_grades::execute_returns(), $result));
+        $this->assertEqualsWithDelta(80.0, $grades[1]['grade'], 0.0001);
+    }
+
+    /**
+     * SEC-008: formula-like export cells are neutralised; everything else is untouched.
+     */
+    public function test_neutralise_spreadsheet_cell(): void {
+        $n = [\mod_exelearning\local\attempts::class, 'neutralise_spreadsheet_cell'];
+        foreach (['=1+1', '+1', '-2', '@SUM(A1)', "\tx", "\rx", '  =cmd'] as $value) {
+            $this->assertSame("'" . $value, $n($value), var_export($value, true));
+        }
+        foreach (['Ana', '', 'a=b', "'=safe", 1.5, 3] as $value) {
+            $this->assertSame($value, $n($value));
+        }
+    }
+
     public function test_save_track_records_grades_and_recomputes_overall(): void {
         $this->setUser($this->student);
 
