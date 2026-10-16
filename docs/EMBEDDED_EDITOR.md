@@ -67,8 +67,8 @@ The editor bootstrap page is `editor/index.php`. Access requires
 active editor `index.html` (resolver), injects a `<base>` tag pointing at
 `editor/static.php/<cmid>` and a Moodle config script, swallows 404s on
 missing `.css`/`idevices` resources, and appends the bridge script
-`amd/src/moodle_exe_bridge.js` (`editor/index.php:98-309`). The response sets
-`X-Frame-Options: SAMEORIGIN` (`:314`).
+`amd/src/moodle_exe_bridge.js` (`editor/index.php:98-337`). The response sets
+`X-Frame-Options: SAMEORIGIN` (`:344`).
 
 The client-side overlay is `amd/src/editor_modal.js`. A delegated click on a
 `[data-action="mod_exelearning/editor-open"]` button (`:722-739`) opens a
