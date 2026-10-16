@@ -112,6 +112,53 @@ describe('parseSuspend', () => {
     });
 });
 
+describe('createScormApi transport (bridge mode)', () => {
+    function cfg(transport) {
+        // No-op timers so the only send() is the explicit LMSCommit (no stray autocommit).
+        return { transport, awaitInteraction: false, bindUnload: false, getScoringDocument: () => document, setTimeout: () => 0, clearTimeout: () => {} };
+    }
+
+    it('clears dirty when the transport accepts the payload (no XHR)', () => {
+        let calls = 0;
+        const { api } = createScormApi(cfg(() => { calls++; return true; }));
+        api.LMSSetValue('cmi.core.score.raw', '50');
+        expect(api.LMSCommit()).toBe('true');
+        expect(calls).toBe(1);
+        // Not dirty anymore: a second commit sends nothing.
+        expect(api.LMSCommit()).toBe('true');
+        expect(calls).toBe(1);
+    });
+
+    it('keeps dirty (Commit -> "false") when the transport rejects', () => {
+        const { api } = createScormApi(cfg(() => false));
+        api.LMSSetValue('cmi.core.score.raw', '50');
+        expect(api.LMSCommit()).toBe('false');
+    });
+
+    it('reports error 101 when the transport throws', () => {
+        const { api } = createScormApi(cfg(() => { throw new Error('boom'); }));
+        api.LMSSetValue('cmi.core.score.raw', '50');
+        expect(api.LMSCommit()).toBe('false');
+        expect(api.LMSGetLastError()).toBe('101');
+    });
+});
+
+describe('createScormApi transport with interaction gating', () => {
+    it('forwards the answered iDevices to the transport', () => {
+        document.body.innerHTML = '<div class="idevice_node" id="ide-tf"><button id="check">Check</button></div>';
+        const sent = [];
+        const tracker = createScormApi({ transport: (data) => { sent.push(data); return true; },
+            bindUnload: false, getScoringDocument: () => document, setTimeout: () => 0, clearTimeout: () => {} });
+        tracker.api.LMSInitialize('');
+        tracker.noteInteraction(document.getElementById('check'));
+        tracker.api.LMSSetValue('cmi.suspend_data', '1. "Verdadero o falso"; Puntuación: 0%; Peso: 100%');
+        tracker.api.LMSSetValue('cmi.core.score.raw', '0');
+        expect(tracker.api.LMSCommit()).toBe('true');
+        expect(sent).toHaveLength(1);
+        expect(sent[0].answered).toEqual(['ide-tf']);
+    });
+});
+
 describe('parseSuspend (versioned exe12 payload, core PR #2209)', () => {
     // Captured verbatim from a package built by the new SCORM 1.2 runtime.
     const REAL = 'exe12/1|ide-a;7;0;4;100;25;0;100';
@@ -411,6 +458,8 @@ describe('createScormApi state machine', () => {
             trackurl: 'https://example.test/track.php',
             session: 'tok',
             bindUnload: false,
+            // These cases test the commit contract itself, not when an attempt starts.
+            awaitInteraction: false,
             getScoringDocument: () => document,
             setTimeout: (fn) => { scheduled = fn; return 1; },
             clearTimeout: () => { scheduled = null; },
@@ -486,6 +535,7 @@ describe('createScormApi state machine', () => {
             trackurl: 'https://example.test/track.php',
             session: 'tok',
             bindUnload: true,
+            awaitInteraction: false,
             getScoringDocument: () => document,
             xhrFactory: () => xhr,
             setTimeout: (fn) => { timer = fn; return 7; },
@@ -515,34 +565,262 @@ describe('createScormApi state machine', () => {
 
 });
 
-describe('createScormApi transport (bridge mode)', () => {
-    function cfg(transport) {
-        // No-op timers so the only send() is the explicit LMSCommit (no stray autocommit).
-        return { transport, bindUnload: false, getScoringDocument: () => document, setTimeout: () => 0, clearTimeout: () => {} };
+// exelearning/exelearning issue 2458: the package's own runtime seeds every gradable
+// iDevice with a score of 0 as soon as the page loads (registerActivity, then
+// showFinalScore writing cmi.core.score.raw = 0). Those writes are byte-identical to a
+// real answer worth 0, so only the learner's interaction tells them apart: an attempt
+// must start when a score is written AFTER the learner interacted with an iDevice.
+describe('createScormApi: attempts start on learner interaction', () => {
+    const SEED = '1. "Verdadero o falso"; Puntuación: 0%; Peso: 100%';
+    let scheduled;
+    function config(xhr) {
+        scheduled = null;
+        return {
+            cmid: 42,
+            trackurl: 'https://example.test/track.php',
+            session: 'tok',
+            bindUnload: false,
+            getScoringDocument: () => document,
+            xhrFactory: () => xhr,
+            setTimeout: (fn) => { scheduled = fn; return 1; },
+            clearTimeout: () => { scheduled = null; },
+        };
+    }
+    /** Replays what the package runtime writes on load, before any interaction. */
+    function seedOnLoad(api) {
+        api.LMSInitialize('');
+        api.LMSSetValue('cmi.suspend_data', SEED);
+        api.LMSSetValue('cmi.core.score.raw', '0');
+        api.LMSSetValue('cmi.core.lesson_status', 'failed');
+    }
+    beforeEach(() => {
+        document.body.innerHTML = '<nav><a id="next" href="#">Next</a></nav>'
+            + '<div class="idevice_node" id="ide-tf"><button id="check">Check</button></div>';
+    });
+
+    it('sends nothing when the page is only opened (no attempt, no grade change)', () => {
+        const xhr = makeXhr(200);
+        const { api } = createScormApi(config(xhr));
+        seedOnLoad(api);
+        if (scheduled) { scheduled(); }
+        expect(api.LMSCommit()).toBe('true');
+        expect(api.LMSFinish()).toBe('true');
+        expect(xhr.calls).toHaveLength(0);
+    });
+
+    it('records a legitimate score of 0 once the learner answers', () => {
+        const xhr = makeXhr(200);
+        const tracker = createScormApi(config(xhr));
+        seedOnLoad(tracker.api);
+        tracker.noteInteraction(document.getElementById('check'));
+        // The learner checks a wrong answer: the runtime rewrites the same 0 values.
+        tracker.api.LMSSetValue('cmi.suspend_data', SEED);
+        tracker.api.LMSSetValue('cmi.core.score.raw', '0');
+        tracker.api.LMSSetValue('cmi.core.lesson_status', 'failed');
+        scheduled();
+        expect(xhr.calls).toHaveLength(1);
+        const body = JSON.parse(xhr.lastPayload);
+        expect(body.cmi['cmi.core.score.raw']).toBe('0');
+        expect(body.itemscores).toEqual({ 'ide-tf': { scorepct: 0, weighted: 100, title: 'Verdadero o falso' } });
+    });
+
+    it('does not start an attempt when the learner interacts without producing a score', () => {
+        const xhr = makeXhr(200);
+        const tracker = createScormApi(config(xhr));
+        seedOnLoad(tracker.api);
+        tracker.noteInteraction(document.getElementById('check'));
+        expect(tracker.api.LMSFinish()).toBe('true');
+        expect(xhr.calls).toHaveLength(0);
+    });
+
+    it('does not treat navigation outside an iDevice as an answer', () => {
+        const xhr = makeXhr(200);
+        const tracker = createScormApi(config(xhr));
+        tracker.noteInteraction(document.getElementById('next'));
+        // The next page's iDevices seed themselves.
+        seedOnLoad(tracker.api);
+        expect(tracker.api.LMSFinish()).toBe('true');
+        expect(xhr.calls).toHaveLength(0);
+    });
+
+    it('does not let an interaction on one package page start an attempt on the next', () => {
+        const xhr = makeXhr(200);
+        let current = document;
+        const tracker = createScormApi({ ...config(xhr), getScoringDocument: () => current });
+        seedOnLoad(tracker.api);
+        // The learner clicks inside a (text) iDevice, then moves to the next page,
+        // whose iDevices seed themselves on load.
+        tracker.noteInteraction(document.getElementById('check'));
+        current = document.implementation.createHTMLDocument('page 2');
+        seedOnLoad(tracker.api);
+        expect(tracker.api.LMSFinish()).toBe('true');
+        expect(xhr.calls).toHaveLength(0);
+    });
+
+    it('ignores synthetic (untrusted) events dispatched by scripts', () => {
+        const xhr = makeXhr(200);
+        const { api } = createScormApi(config(xhr));
+        seedOnLoad(api);
+        document.getElementById('check').dispatchEvent(new window.Event('pointerdown', { bubbles: true }));
+        api.LMSSetValue('cmi.core.score.raw', '0');
+        expect(api.LMSFinish()).toBe('true');
+        expect(xhr.calls).toHaveLength(0);
+    });
+
+    /**
+     * Capture the listeners the tracker registers on the document: the DOM cannot
+     * dispatch trusted events, so tests call them with the event real input produces.
+     */
+    function captureDocumentListeners() {
+        const listeners = {};
+        const spy = vi.spyOn(document, 'addEventListener').mockImplementation((type, fn) => {
+            listeners[type] = fn;
+        });
+        return { listeners, spy };
     }
 
-    it('clears dirty when the transport accepts the payload (no XHR)', () => {
-        let calls = 0;
-        const { api } = createScormApi(cfg(() => { calls++; return true; }));
-        api.LMSSetValue('cmi.core.score.raw', '50');
-        expect(api.LMSCommit()).toBe('true');
-        expect(calls).toBe(1);
-        // Not dirty anymore: a second commit sends nothing.
-        expect(api.LMSCommit()).toBe('true');
-        expect(calls).toBe(1);
+    it('starts the attempt on real learner input inside an iDevice', () => {
+        const { listeners, spy } = captureDocumentListeners();
+        try {
+            const xhr = makeXhr(200);
+            const { api } = createScormApi(config(xhr));
+            seedOnLoad(api);
+            listeners.pointerdown({ isTrusted: true, target: document.getElementById('check') });
+            api.LMSSetValue('cmi.core.score.raw', '0');
+            scheduled();
+            expect(xhr.calls).toHaveLength(1);
+        } finally {
+            spy.mockRestore();
+        }
     });
 
-    it('keeps dirty (Commit -> "false") when the transport rejects', () => {
-        const { api } = createScormApi(cfg(() => false));
-        api.LMSSetValue('cmi.core.score.raw', '50');
-        expect(api.LMSCommit()).toBe('false');
+    it('starts the attempt on a bare trusted click (assistive technology)', () => {
+        // Screen reader browse mode, voice and switch control activate a control with a
+        // click that no pointerdown or keydown precedes.
+        const { listeners, spy } = captureDocumentListeners();
+        try {
+            const xhr = makeXhr(200);
+            const { api } = createScormApi(config(xhr));
+            seedOnLoad(api);
+            listeners.click({ isTrusted: true, target: document.getElementById('check') });
+            api.LMSSetValue('cmi.core.score.raw', '0');
+            scheduled();
+            expect(xhr.calls).toHaveLength(1);
+        } finally {
+            spy.mockRestore();
+        }
     });
 
-    it('reports error 101 when the transport throws', () => {
-        const { api } = createScormApi(cfg(() => { throw new Error('boom'); }));
-        api.LMSSetValue('cmi.core.score.raw', '50');
-        expect(api.LMSCommit()).toBe('false');
-        expect(api.LMSGetLastError()).toBe('101');
+    it('starts the attempt on dictated text (trusted input without a key press)', () => {
+        document.getElementById('ide-tf').innerHTML = '<input id="answer">';
+        const { listeners, spy } = captureDocumentListeners();
+        try {
+            const xhr = makeXhr(200);
+            const { api } = createScormApi(config(xhr));
+            seedOnLoad(api);
+            listeners.input({ isTrusted: true, target: document.getElementById('answer') });
+            api.LMSSetValue('cmi.core.score.raw', '0');
+            scheduled();
+            expect(xhr.calls).toHaveLength(1);
+        } finally {
+            spy.mockRestore();
+        }
+    });
+
+    it('ignores a click the runtime synthesises (el.click(), jQuery .trigger())', () => {
+        const xhr = makeXhr(200);
+        const { api } = createScormApi(config(xhr));
+        seedOnLoad(api);
+        document.getElementById('check').click();
+        api.LMSSetValue('cmi.core.score.raw', '0');
+        expect(api.LMSFinish()).toBe('true');
+        expect(xhr.calls).toHaveLength(0);
+    });
+
+    /**
+     * Fire the captured window blur listeners, run the tracker's deferred focus check
+     * through the injected timer, then let any other pending timer settle too.
+     */
+    async function blurWindow(blur) {
+        blur.forEach((fn) => fn());
+        scheduled();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+
+    it('starts the attempt when focus moves into an iframe nested in an iDevice', async () => {
+        const blur = [];
+        const spy = vi.spyOn(window, 'addEventListener').mockImplementation((type, fn) => {
+            if (type === 'blur') { blur.push(fn); }
+        });
+        try {
+            document.getElementById('ide-tf').innerHTML = '<iframe id="applet"></iframe>';
+            const xhr = makeXhr(200);
+            const { api } = createScormApi(config(xhr));
+            seedOnLoad(api);
+            // Clicking the applet moves focus to the nested iframe, which becomes the
+            // page's active element once the blur has settled.
+            document.getElementById('applet').focus();
+            await blurWindow(blur);
+            api.LMSSetValue('cmi.core.score.raw', '0');
+            scheduled();
+            expect(xhr.calls).toHaveLength(1);
+        } finally {
+            spy.mockRestore();
+        }
+    });
+
+    it('does not start the attempt when focus leaves the page outside an iDevice', async () => {
+        const blur = [];
+        const spy = vi.spyOn(window, 'addEventListener').mockImplementation((type, fn) => {
+            if (type === 'blur') { blur.push(fn); }
+        });
+        try {
+            const xhr = makeXhr(200);
+            const { api } = createScormApi(config(xhr));
+            seedOnLoad(api);
+            document.getElementById('next').focus();
+            await blurWindow(blur);
+            api.LMSSetValue('cmi.core.score.raw', '0');
+            expect(api.LMSFinish()).toBe('true');
+            expect(xhr.calls).toHaveLength(0);
+        } finally {
+            spy.mockRestore();
+        }
+    });
+
+    it('does not start the attempt when the page loses focus with an iDevice field focused', async () => {
+        // The runtime focuses a field on load; the learner then switches tabs or
+        // clicks the Moodle page. Losing focus is not an answer.
+        const blur = [];
+        const spy = vi.spyOn(window, 'addEventListener').mockImplementation((type, fn) => {
+            if (type === 'blur') { blur.push(fn); }
+        });
+        try {
+            document.getElementById('ide-tf').innerHTML = '<input id="answer">';
+            const xhr = makeXhr(200);
+            const { api } = createScormApi(config(xhr));
+            seedOnLoad(api);
+            document.getElementById('answer').focus();
+            await blurWindow(blur);
+            api.LMSSetValue('cmi.core.score.raw', '0');
+            expect(api.LMSFinish()).toBe('true');
+            expect(xhr.calls).toHaveLength(0);
+        } finally {
+            spy.mockRestore();
+        }
+    });
+
+    it('keeps committing normally once the attempt has started', () => {
+        const xhr = makeXhr(200);
+        const tracker = createScormApi(config(xhr));
+        seedOnLoad(tracker.api);
+        tracker.noteInteraction(document.getElementById('check'));
+        tracker.api.LMSSetValue('cmi.core.score.raw', '100');
+        scheduled();
+        // A later page's seed rides along with the attempt that already exists.
+        tracker.api.LMSSetValue('cmi.core.lesson_status', 'passed');
+        expect(tracker.api.LMSCommit()).toBe('true');
+        expect(xhr.calls).toHaveLength(2);
     });
 });
 
@@ -614,5 +892,136 @@ describe('parseSuspend (versioned exe12 payload, core PR #2209)', () => {
 
     it('still parses the legacy format (the header is what selects the parser)', () => {
         expect(parseSuspend('1. "Quiz"; score: 60%; weighted: 30%.')[1].title).toBe('Quiz');
+    });
+});
+
+describe('createScormApi: the payload names the iDevices the learner answered', () => {
+    // Two gradable iDevices on one page, as in the demo activity (True/False + Guess).
+    // On load the runtime seeds both with 0 in a single suspend_data write. Their seeds
+    // stay in every later write, so the tracker sends the full map (the attempt score
+    // the package computes) and lists in `answered` the iDevices answered in this visit
+    // (exelearning issue 2481): only those get a per-iDevice result.
+    const SEED = '1. "Verdadero o falso"; Puntuación: 0%; Peso: 50%.\t'
+        + '2. "Adivina"; Puntuación: 0%; Peso: 50%';
+    const GUESS_RIGHT = '1. "Verdadero o falso"; Puntuación: 0%; Peso: 50%.\t'
+        + '2. "Adivina"; Puntuación: 100%; Peso: 50%';
+    let scheduled;
+    function config(xhr) {
+        scheduled = null;
+        return {
+            cmid: 42,
+            trackurl: 'https://example.test/track.php',
+            session: 'tok',
+            bindUnload: false,
+            getScoringDocument: () => document,
+            xhrFactory: () => xhr,
+            setTimeout: (fn) => { scheduled = fn; return 1; },
+            clearTimeout: () => { scheduled = null; },
+        };
+    }
+    function seedOnLoad(api) {
+        api.LMSInitialize('');
+        api.LMSSetValue('cmi.suspend_data', SEED);
+        api.LMSSetValue('cmi.core.score.raw', '0');
+    }
+    function lastBody(xhr) {
+        return JSON.parse(xhr.lastPayload);
+    }
+    beforeEach(() => {
+        document.body.innerHTML = '<div class="idevice_node" id="ide-tf">'
+            + '<p id="tf-text">The sky is green.</p><button id="tf">Check</button></div>'
+            + '<div class="idevice_node" id="ide-guess"><button id="guess">Check</button></div>';
+    });
+
+    it('sends the full map and lists only the answered iDevice (issue 2481)', () => {
+        const xhr = makeXhr(200);
+        const tracker = createScormApi(config(xhr));
+        seedOnLoad(tracker.api);
+        // The learner plays only the Guess iDevice and gets it right.
+        tracker.noteInteraction(document.getElementById('guess'));
+        tracker.api.LMSSetValue('cmi.suspend_data', GUESS_RIGHT);
+        tracker.api.LMSSetValue('cmi.core.score.raw', '50');
+        scheduled();
+        expect(xhr.calls).toHaveLength(1);
+        expect(lastBody(xhr).itemscores).toEqual({
+            'ide-tf': { scorepct: 0, weighted: 50, title: 'Verdadero o falso' },
+            'ide-guess': { scorepct: 100, weighted: 50, title: 'Adivina' },
+        });
+        expect(lastBody(xhr).answered).toEqual(['ide-guess']);
+    });
+
+    it('does not count a click on another iDevice\'s text as an answer', () => {
+        const xhr = makeXhr(200);
+        const tracker = createScormApi(config(xhr));
+        seedOnLoad(tracker.api);
+        // The learner reads the True/False statement, then answers only Guess, wrongly:
+        // the Guess score stays at its seed, so only the attribution can name it.
+        tracker.noteInteraction(document.getElementById('tf-text'));
+        tracker.noteInteraction(document.getElementById('guess'));
+        tracker.api.LMSSetValue('cmi.suspend_data', SEED);
+        tracker.api.LMSSetValue('cmi.core.score.raw', '0');
+        scheduled();
+        expect(lastBody(xhr).answered).toEqual(['ide-guess']);
+    });
+
+    it('lists a genuine 0 answer, identical to its seed', () => {
+        const xhr = makeXhr(200);
+        const tracker = createScormApi(config(xhr));
+        seedOnLoad(tracker.api);
+        tracker.noteInteraction(document.getElementById('guess'));
+        tracker.api.LMSSetValue('cmi.suspend_data', GUESS_RIGHT);
+        scheduled();
+        // Then answers the True/False wrongly: its value stays 0, identical to the seed.
+        tracker.noteInteraction(document.getElementById('tf'));
+        tracker.api.LMSSetValue('cmi.suspend_data', GUESS_RIGHT);
+        scheduled();
+        expect(lastBody(xhr).answered.sort()).toEqual(['ide-guess', 'ide-tf']);
+    });
+
+    it('lists an iDevice whose score moved away from its seed', () => {
+        const xhr = makeXhr(200);
+        const tracker = createScormApi(config(xhr));
+        seedOnLoad(tracker.api);
+        // The write that scores Guess lands after the learner's last interaction moved
+        // to True/False (an asynchronous check): attribution names True/False, and the
+        // changed score still names Guess.
+        tracker.noteInteraction(document.getElementById('tf'));
+        tracker.api.LMSSetValue('cmi.suspend_data', GUESS_RIGHT);
+        scheduled();
+        expect(lastBody(xhr).answered.sort()).toEqual(['ide-guess', 'ide-tf']);
+    });
+
+    it('omits answered when interaction gating is off', () => {
+        const xhr = makeXhr(200);
+        const tracker = createScormApi({ ...config(xhr), awaitInteraction: false });
+        seedOnLoad(tracker.api);
+        scheduled();
+        expect(lastBody(xhr)).not.toHaveProperty('answered');
+        expect(Object.keys(lastBody(xhr).itemscores).sort()).toEqual(['ide-guess', 'ide-tf']);
+    });
+
+    it('keeps attributing answers on later pages after the attempt has started', () => {
+        const xhr = makeXhr(200);
+        let current = document;
+        const tracker = createScormApi({ ...config(xhr), getScoringDocument: () => current });
+        seedOnLoad(tracker.api);
+        tracker.noteInteraction(document.getElementById('guess'));
+        tracker.api.LMSSetValue('cmi.suspend_data', GUESS_RIGHT);
+        scheduled();
+        // Page 2 carries one gradable iDevice; its seed is not attributed to Guess.
+        current = document.implementation.createHTMLDocument('page 2');
+        current.body.innerHTML = '<div class="idevice_node" id="ide-p2"><button id="p2">Check</button></div>';
+        const listeners = {};
+        current.addEventListener = (type, fn) => { listeners[type] = fn; };
+        tracker.api.LMSSetValue('cmi.suspend_data', '1. "Quiz"; Puntuación: 0%; Peso: 100%');
+        scheduled();
+        expect(lastBody(xhr).answered).toEqual(['ide-guess']);
+        // Real input on the new page must still be watched after the attempt started;
+        // a wrong answer leaves the score at its seed.
+        listeners.pointerdown({ isTrusted: true, target: current.getElementById('p2') });
+        tracker.api.LMSSetValue('cmi.suspend_data', '1. "Quiz"; Puntuación: 0%; Peso: 100%');
+        scheduled();
+        expect(lastBody(xhr).answered.sort()).toEqual(['ide-guess', 'ide-p2']);
+        expect(Object.keys(lastBody(xhr).itemscores).sort()).toEqual(['ide-guess', 'ide-p2', 'ide-tf']);
     });
 });

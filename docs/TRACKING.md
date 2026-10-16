@@ -26,7 +26,7 @@ funnels every channel into **one** server-side scoring method, `track::ingest()`
  window.API shim          view.php:380-537   (inline JS in the parent window)
         │  buffers CMI pairs; on cmi.suspend_data, resolves each scored iDevice
         │  to its stable objectid by reading the iframe DOM (DEC-5-01)
-        │  POST { id:<cmid>, sesskey, session, cmi, itemscores }
+        │  POST { id:<cmid>, sesskey, session, cmi, itemscores, answered }
         ▼
  track.php                (sesskey + capability; web/AJAX entry)
         │  required_param id (track.php:40) · decode body, then
@@ -72,6 +72,35 @@ persists**: `ingest()` returns before any gradebook write
   (`random_string(20)`, `view.php:531`) and stamps every auto-commit of that page
   view with it. `resolve_attempt_number()` reuses the attempt for a known token,
   else allocates `MAX(attempt)+1` (`classes/local/attempts.php:182-206`).
+- **An attempt starts when the learner answers.** The package's runtime seeds every
+  gradable iDevice with a score of 0 as soon as a page loads, which is byte-identical
+  to a real answer worth 0. The tracker therefore sends nothing until a score is
+  written after a trusted interaction inside an iDevice of that same page
+  (`js/scorm_tracker.js`, exelearning issue 2458): pointer, touch, key, click (the
+  only event assistive technology sends) or input/change (dictation). Events a script
+  dispatches are not trusted and never count. A window blur counts only when focus
+  moved into an iframe, object or embed inside an iDevice (a click on a nested applet
+  never reaches the page); switching tabs with an iDevice field focused does not.
+  Opening or reviewing the activity creates no attempt, consumes no allowed attempt
+  and changes no grade; a submitted 0 is still recorded like any other score.
+- **Only answered iDevices get a per-iDevice row.** Once the attempt has started,
+  the seed of every gradable iDevice the learner did not answer is still 0 in
+  `cmi.suspend_data` (exelearning issue 2481). The tracker posts the full
+  `itemscores` map plus `answered`, the objectids answered during this visit. A score
+  write (`cmi.suspend_data`, `cmi.core.score.raw`, `cmi.core.lesson_status`) made
+  after a trusted interaction on that page is attributed to the iDevice of the
+  learner's last such interaction only, so clicking a question's text or opening a
+  hint and then answering another iDevice names just the one answered; a genuine 0
+  is still attributed. An iDevice whose captured score moved away from its seed
+  counts as answered too. `ingest()` recomputes the overall from the full map (the
+  attempt score the package computes: an unanswered iDevice counts 0 for this
+  attempt) and writes rows with `itemnumber > 0` only for `answered`, whether the
+  scores come from the map, an `exe12/` `cmi.suspend_data` or the legacy page-local
+  fallback (a slot is matched through the objectid of the grade item it routes to).
+  An unanswered iDevice keeps its previous grade, or stays empty. `answered` is
+  filtered like `itemscores` (strings naming registered objectids, `> 1000` entries
+  or a non-array name nothing). Without the key (the `save_track` web service, an
+  older cached tracker) every scored iDevice is recorded as before.
 - **Flat table.** `exelearning_attempt` holds one row per
   `(exelearningid, userid, attempt, itemnumber)`; `itemnumber=0` is the overall, `>0`
   is an iDevice (`db/install.xml:71-82`). `record_item()` upserts so repeated

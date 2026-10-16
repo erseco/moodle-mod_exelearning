@@ -169,7 +169,8 @@
                 type: 'scorm',
                 action: 'track',
                 cmi: data.cmi,
-                itemscores: data.itemscores
+                itemscores: data.itemscores,
+                answered: data.answered
             };
             if (ready) { postToParent(msg); } else { queue.push(msg); }
             return true;

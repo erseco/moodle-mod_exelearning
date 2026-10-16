@@ -49,6 +49,26 @@ function deliver(win, event) {
     (win.listeners.message || []).forEach((fn) => fn(event));
 }
 
+/**
+ * Activate the shim and replay a real learner click inside an iDevice. Since issue
+ * 2458 the tracker holds every commit until the learner interacts, and the DOM cannot
+ * dispatch trusted events, so the captured listener is called directly.
+ */
+function activateAnswered(win) {
+    if (!document.querySelector('.idevice_node')) {
+        document.body.innerHTML = '<div class="idevice_node" id="ide-x"><button>Check</button></div>';
+    }
+    const listeners = {};
+    const spy = vi.spyOn(document, 'addEventListener').mockImplementation((type, fn) => { listeners[type] = fn; });
+    try {
+        shim.activate(win);
+        win.API.LMSInitialize('');
+    } finally {
+        spy.mockRestore();
+    }
+    listeners.pointerdown({ isTrusted: true, target: document.querySelector('.idevice_node button, .idevice_node') });
+}
+
 describe('shim createMemoryStorage', () => {
     it('behaves like a string-coercing in-memory Storage', () => {
         const s = shim.createMemoryStorage();
@@ -126,7 +146,7 @@ describe('shim activate (handshake + transport)', () => {
 
     it('queues scores until config arrives, then flushes them stamped with the nonce', () => {
         const win = makeFakeWin();
-        shim.activate(win);
+        activateAnswered(win);
         // Score before the handshake completes: must be queued, not posted yet.
         win.API.LMSSetValue('cmi.core.score.raw', '80');
         win.API.LMSCommit();
@@ -141,7 +161,7 @@ describe('shim activate (handshake + transport)', () => {
 
     it('posts scores immediately once ready', () => {
         const win = makeFakeWin();
-        shim.activate(win);
+        activateAnswered(win);
         deliver(win, { source: win.parent, data: { type: 'scorm', action: 'config', nonce: 'N2' } });
         win.API.LMSSetValue('cmi.core.lesson_status', 'completed');
         win.API.LMSCommit();
@@ -396,7 +416,7 @@ describe('shim extra branches (coverage)', () => {
     it('resolves per-iDevice scores from its own document on suspend_data', () => {
         document.body.innerHTML = '<div class="idevice_node" id="ide-x"></div>';
         const win = makeFakeWin();
-        shim.activate(win);
+        activateAnswered(win);
         deliver(win, { source: win.parent, data: { type: 'scorm', action: 'config', nonce: 'N' } });
         win.API.LMSSetValue('cmi.suspend_data', '1. "Q"; Score: 60%; Weight: 30%');
         win.API.LMSCommit();

@@ -147,7 +147,7 @@
             if (watchdog && win && win.clearTimeout) { win.clearTimeout(watchdog); watchdog = null; }
         }
 
-        function buildBody(cmi, itemscores) {
+        function buildBody(cmi, itemscores, answered) {
             // Mirror the legacy track.php payload, but identity (cmid, sesskey, mode)
             // lives on this trusted parent — only the CMI buffer and per-iDevice scores
             // come from the iframe. The sesskey travels in the body, never in the query
@@ -157,12 +157,14 @@
                 session: session,
                 sesskey: sesskey,
                 cmi: cmi,
-                itemscores: itemscores || {}
+                itemscores: itemscores || {},
+                // iDevices answered this visit (issue 2481); undefined keeps them all.
+                answered: Array.isArray(answered) ? answered : undefined
             });
         }
 
-        function postTrack(cmi, itemscores) {
-            var body = buildBody(cmi, itemscores);
+        function postTrack(cmi, itemscores, answered) {
+            var body = buildBody(cmi, itemscores, answered);
             latest = body;
             if (!fetchImpl) { return; }
             try {
@@ -199,7 +201,7 @@
                 return;
             }
             if (!acceptTrack(data, nonce)) { return; }              // type + action + nonce + shape.
-            postTrack(data.cmi, data.itemscores);
+            postTrack(data.cmi, data.itemscores, data.answered);
         }
 
         function init() {
