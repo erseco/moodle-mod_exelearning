@@ -327,18 +327,22 @@ final class serving_test extends advanced_testcase {
     }
 
     /**
-     * The service-worker neutralization stub returns a faithful registration
-     * shape (non-empty scope + a no-op addEventListener), not a bare
-     * { scope: "" } that the editor's preview provider aborts on when it calls
-     * registration.addEventListener("updatefound", …).
+     * The bootstrap leaves navigator.serviceWorker.register untouched.
+     *
+     * Blocking preview-sw.js forced the editor's blob: preview fallback, and that
+     * fallback drops theme images (exelearning/exelearning issue 2476). The editor
+     * already catches a failed registration. The behaviour is exercised by
+     * tests/js/editor_bootstrap.test.js; this guards the source so the stub cannot
+     * return unnoticed.
      */
-    public function test_editor_bootstrap_sw_stub_is_faithful(): void {
+    public function test_editor_bootstrap_does_not_stub_preview_service_worker(): void {
         $source = file_get_contents(__DIR__ . '/../../../editor/index.php');
         $this->assertNotFalse($source);
-        $this->assertStringContainsString('fakeSwRegistration', $source);
-        $this->assertStringContainsString('addEventListener: function() {}', $source);
-        // No register path resolves the bare stub that aborted the preview
-        // provider (the explanatory comment names the shape, so match the return).
-        $this->assertStringNotContainsString('Promise.resolve({ scope: "" })', $source);
+        $this->assertStringNotContainsString('fakeSwRegistration', $source);
+        $this->assertStringNotContainsString('preview-sw.js") !== -1', $source);
+        $this->assertStringContainsString(
+            'navigator.serviceWorker.register is deliberately',
+            $source
+        );
     }
 }
