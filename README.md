@@ -176,6 +176,18 @@ not offered and the editor endpoints answer 404. A leftover
 `moodledata/mod_exelearning/embedded_editor/` directory from older plugin
 versions is obsolete and ignored; it can be deleted manually at any time.
 
+The bundle is served only through `editor/static.php` (login and
+`moodle/course:manageactivities`), and that router never serves the editor's
+own entry page: `index.html` runs inlined by `editor/index.php` and nowhere
+else. Opened as a plain page, the entry page boots a standalone editor that
+fetches and opens any package named in its `?url=` query, on the Moodle
+origin, for whoever follows the link. Direct web access to `dist/` should
+therefore be denied. The shipped `dist/.htaccess` does this on Apache where
+`.htaccess` files are honoured (`AllowOverride`); nginx needs the equivalent
+in the server block, for example
+`location ^~ /mod/exelearning/dist/ { deny all; }` (prefix the path with
+Moodle's own directory when it is not at the web root).
+
 ## Gradebook behaviour
 
 When a teacher uploads a `.elpx`, the plugin extracts the package and detects
