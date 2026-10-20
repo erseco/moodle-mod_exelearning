@@ -12,6 +12,12 @@ export default defineConfig({
         // happy-dom gives the tracker a window/document for resolveObjectMap and the
         // beforeunload wiring, matching the embedded editor's own setup.
         environment: 'happy-dom',
+        // happy-dom 21 makes iframe page loading opt-in, which leaves iframes
+        // without a contentWindow; the embed/bridge tests identify a message's
+        // sender by comparing event.source against it.
+        environmentOptions: {
+            happyDOM: { settings: { enableIframePageLoading: true } },
+        },
         include: ['tests/js/**/*.test.js'],
         coverage: {
             provider: 'v8',
