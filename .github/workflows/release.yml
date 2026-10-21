@@ -170,7 +170,13 @@ jobs:
             echo "CREATE_PLUGIN_TAG=$CREATE_PLUGIN_TAG"
             echo "PUBLISH_RELEASE=$PUBLISH_RELEASE"
           } >> "$GITHUB_ENV"
-          bash scripts/check-version.sh --release "$RELEASE_TAG"
+          # Same rule as the build job: a manual build validates the committed
+          # state, so it still works on a commit that carries a final release.
+          if [ "$PUBLISH_RELEASE" = "true" ]; then
+            bash scripts/check-version.sh --release "$RELEASE_TAG"
+          else
+            bash scripts/check-version.sh
+          fi
 
       - name: Download static assets outside the checkout
         uses: actions/download-artifact@v8
