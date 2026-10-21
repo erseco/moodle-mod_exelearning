@@ -19,6 +19,9 @@ STATIC_SUFFIXES = set('''
 SERVER_SUFFIX = re.compile(r'\.(?:php\d*|phtml|pht|phar|shtml|cgi|fcgi|py|rb|sh)(?:\.|$)', re.I)
 # `.pl` is also the Polish locale code (messages.pl.json). A CGI script needs an
 # interpreter line, so a `.pl` infix is rejected only on a file that starts with one.
+# mod_perl (AddHandler perl-script .pl) runs Perl without that line; filename checks
+# cannot cover it, nor any other handler mapping: denying direct HTTP access to dist/
+# is the required control (dist/.htaccess, nginx rule, scripts/check-editor-http.sh).
 PERL_SUFFIX = re.compile(r'\.pl(?:\.|$)', re.I)
 
 
