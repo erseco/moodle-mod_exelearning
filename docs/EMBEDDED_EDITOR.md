@@ -58,7 +58,13 @@ package a link names, on the Moodle origin, for the teacher who follows it.
 The same page is reachable with no capability at all when the web server
 serves `mod/exelearning/dist/static/` directly, so the shipped `dist/.htaccess`
 denies the directory on Apache and the README gives the nginx equivalent;
-`scripts/check-package.sh` asserts the file ships.
+`scripts/check-package.sh` asserts the file ships. Blocking direct access is a
+mandatory installation requirement, verified after installation, upgrade and
+web-server changes with `bash scripts/check-editor-http.sh <Moodle URL>` (see
+README). The check rejects exposed entry pages/assets, redirects and server
+errors. `scripts/nginx-exelearning.conf` is included by the local Docker stack;
+production administrators must install the equivalent in their own server block.
+A passing check does not replace testing the authenticated open/save flow.
 
 **Site-wide toggle (DEC-108-01).** Embedded editing can be switched off with the
 `exelearning/editordisabled` admin setting (a deliberately negative checkbox,

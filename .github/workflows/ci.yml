@@ -349,6 +349,9 @@ jobs:
           bash scripts/check-version-selftest.sh
           bash scripts/check-version.sh
 
+      - name: Validate editor deployment check
+        run: python3 scripts/check-editor-http-selftest.py
+
       - name: Validate release packaging
         run: bash scripts/check-package.sh
 

@@ -181,12 +181,28 @@ The bundle is served only through `editor/static.php` (login and
 own entry page: `index.html` runs inlined by `editor/index.php` and nowhere
 else. Opened as a plain page, the entry page boots a standalone editor that
 fetches and opens any package named in its `?url=` query, on the Moodle
-origin, for whoever follows the link. Direct web access to `dist/` should
-therefore be denied. The shipped `dist/.htaccess` does this on Apache where
+origin, for whoever follows the link. **Installation requirement: direct web
+access to `dist/` must be denied.** The shipped `dist/.htaccess` does this on Apache where
 `.htaccess` files are honoured (`AllowOverride`); nginx needs the equivalent
 in the server block, for example
 `location ^~ /mod/exelearning/dist/ { deny all; }` (prefix the path with
 Moodle's own directory when it is not at the web root).
+
+After every installation, upgrade or web-server configuration change, run this
+required deployment check from the source checkout (Python is needed only for
+its self-test):
+
+```bash
+bash scripts/check-editor-http.sh https://your-moodle.example/moodle
+```
+
+The command must pass before enabling the editor. It checks a public plugin
+asset first, then requires HTTP 403/404 for direct entry-page and asset URLs;
+redirects and server errors fail. Run it against each public hostname and
+origin serving Moodle. Confirm the authenticated editor still opens and saves.
+The local Docker stack includes the nginx rule automatically. This check is a
+deployment gate: the release ZIP cannot configure an external nginx server.
+
 
 ## Gradebook behaviour
 
