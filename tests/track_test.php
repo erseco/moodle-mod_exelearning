@@ -1370,7 +1370,7 @@ final class track_test extends advanced_testcase {
      *                    future timestamp (hidden until).
      */
     public function test_ingest_overall_mode_keeps_a_teacher_hidden_column_hidden(int $hidden): void {
-        [$instance, $student] = $this->create_activity_with_student(['grademodel' => 0]);
+        [$instance, $student] = $this->create_activity_with_student(['grademodel' => EXELEARNING_GRADEMODEL_OVERALL]);
         [$course, $cm] = $this->course_and_cm($instance);
         $obj1 = $this->objectid_for($instance, 1);
 
