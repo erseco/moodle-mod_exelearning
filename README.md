@@ -189,11 +189,20 @@ in the server block, for example
 Moodle's own directory when it is not at the web root).
 
 After every installation, upgrade or web-server configuration change, run this
-required deployment check from the source checkout (Python is needed only for
-its self-test):
+required deployment check. The script lives in the source repository (the
+release ZIP does not ship `scripts/`), so run it from a checkout of the matching
+tag:
 
 ```bash
 bash scripts/check-editor-http.sh https://your-moodle.example/moodle
+```
+
+Without a checkout, the same check by hand: both commands must print `403` or
+`404` (a `200` means the bundle is exposed, a `3xx` or `5xx` is not a pass):
+
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' https://your-moodle.example/moodle/mod/exelearning/dist/static/index.html
+curl -s -o /dev/null -w '%{http_code}\n' https://your-moodle.example/moodle/mod/exelearning/dist/static/app/app.js
 ```
 
 The command must pass before enabling the editor. It checks a public plugin
