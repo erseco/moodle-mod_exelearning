@@ -25,6 +25,7 @@ class EditorAssetsTest(unittest.TestCase):
         self.plugin.write_text('trusted plugin')
 
     def test_copies_only_into_static_directory(self):
+        (self.source / 'app/payload.bin.zst').write_bytes(b'compressed static data')
         install(self.source, self.destination)
         self.assertEqual((self.destination / 'app/app.js').read_text(), 'editor()')
         self.assertEqual(self.plugin.read_text(), 'trusted plugin')

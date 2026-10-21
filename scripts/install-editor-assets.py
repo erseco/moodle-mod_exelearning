@@ -12,7 +12,7 @@ import sys
 STATIC_SUFFIXES = set('''
 .appcache .bak .css .csv .dtd .eot .gif .gz .html .ico .jpeg .jpg .js .json
 .map .md .mjs .mp3 .mp4 .mts .ogg .otf .pdf .png .po .sdf .svg .swf .ts
-.ttf .txt .wasm .wav .webm .webp .woff .woff2 .xap .xml .xsd .zip
+.ttf .txt .wasm .wav .webm .webp .woff .woff2 .xap .xml .xsd .zip .zst
 '''.split())
 SERVER_SUFFIX = re.compile(r'\.(?:php\d*|phtml|pht|phar|shtml|cgi|pl|py|sh|asp|aspx|jsp)(?:\.|$)', re.I)
 
