@@ -16,9 +16,10 @@ name: Release
 # and checks out without persisting credentials, so nothing executed during the
 # build can read a write token from .git/config or the environment, nor plant a
 # git hook or edit a script that a later privileged step would run. `publish`
-# starts on a fresh runner, runs only this repository's own code, downloads the
-# ZIP the build job uploaded, and is the only job allowed to tag, push and
-# publish.
+# starts on a fresh runner, runs only this repository's own code, validates the
+# downloaded static assets,
+# packages them with a clean checkout, and is the only job allowed to tag, push
+# and publish. Plugin source and release metadata never come from build output.
 
 on:
   push:
@@ -64,10 +65,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-    outputs:
-      publish_release: ${{ steps.vars.outputs.publish_release }}
-      create_plugin_tag: ${{ steps.vars.outputs.create_plugin_tag }}
-      release_tag: ${{ steps.vars.outputs.release_tag }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -80,7 +77,6 @@ jobs:
         uses: oven-sh/setup-bun@v2
 
       - name: Set environment variables
-        id: vars
         env:
           INPUT_EDITOR_REPO_URL: ${{ github.event.inputs.editor_repo_url }}
           INPUT_EDITOR_REF: ${{ github.event.inputs.editor_ref }}
@@ -90,7 +86,6 @@ jobs:
             RAW_TAG="${GITHUB_REF##*/}"
             VERSION_TAG="${RAW_TAG#v}"
             PUBLISH_RELEASE=true
-            CREATE_PLUGIN_TAG=false
             RELEASE_TAG="${VERSION_TAG}"
             {
               echo "EXELEARNING_EDITOR_REPO_URL=https://github.com/exelearning/exelearning.git"
@@ -101,7 +96,6 @@ jobs:
             RAW_TAG=$(tr -d '[:space:]' < .editor-version)
             VERSION_TAG="${RAW_TAG#v}"
             PUBLISH_RELEASE=true
-            CREATE_PLUGIN_TAG=true
             RELEASE_TAG="${VERSION_TAG}"
             {
               echo "EXELEARNING_EDITOR_REPO_URL=https://github.com/exelearning/exelearning.git"
@@ -110,7 +104,6 @@ jobs:
             } >> "$GITHUB_ENV"
           else
             PUBLISH_RELEASE=false
-            CREATE_PLUGIN_TAG=false
             RELEASE_TAG=dev
             {
               echo "EXELEARNING_EDITOR_REPO_URL=${INPUT_EDITOR_REPO_URL}"
@@ -120,15 +113,8 @@ jobs:
           fi
           {
             echo "PUBLISH_RELEASE=${PUBLISH_RELEASE}"
-            echo "CREATE_PLUGIN_TAG=${CREATE_PLUGIN_TAG}"
             echo "RELEASE_TAG=${RELEASE_TAG}"
           } >> "$GITHUB_ENV"
-          # The publish job runs on another runner and reads these as job outputs.
-          {
-            echo "publish_release=${PUBLISH_RELEASE}"
-            echo "create_plugin_tag=${CREATE_PLUGIN_TAG}"
-            echo "release_tag=${RELEASE_TAG}"
-          } >> "$GITHUB_OUTPUT"
 
       - name: Validate release metadata
         run: |
@@ -141,24 +127,19 @@ jobs:
       - name: Build static editor
         run: make build-editor
 
-      - name: Create package
-        run: make package RELEASE="${RELEASE_TAG}"
-
-      - name: Upload ZIP as workflow artifact
+      - name: Upload static editor assets only
         uses: actions/upload-artifact@v7
         with:
-          name: mod_exelearning-${{ env.RELEASE_TAG }}
-          path: mod_exelearning-${{ env.RELEASE_TAG }}.zip
+          name: editor-static
+          path: dist/static/
+          include-hidden-files: true
+          if-no-files-found: error
 
   publish:
     needs: build
-    if: needs.build.outputs.publish_release == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write
-    env:
-      RELEASE_TAG: ${{ needs.build.outputs.release_tag }}
-      CREATE_PLUGIN_TAG: ${{ needs.build.outputs.create_plugin_tag }}
     steps:
       # This job runs only this repository's own scripts, so the token
       # actions/checkout persists is what the tag and main pushes below use.
@@ -166,13 +147,56 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Download the built ZIP
+      - name: Read release metadata from the clean checkout
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "release" ]; then
+            RELEASE_TAG="${GITHUB_REF_NAME#v}"
+            CREATE_PLUGIN_TAG=false
+            PUBLISH_RELEASE=true
+          elif [ "$GITHUB_EVENT_NAME" = "push" ]; then
+            RAW_TAG=$(tr -d '[:space:]' < .editor-version)
+            RELEASE_TAG="${RAW_TAG#v}"
+            CREATE_PLUGIN_TAG=true
+            PUBLISH_RELEASE=true
+          else
+            RELEASE_TAG=dev
+            CREATE_PLUGIN_TAG=false
+            PUBLISH_RELEASE=false
+          fi
+          {
+            echo "RELEASE_TAG=$RELEASE_TAG"
+            echo "CREATE_PLUGIN_TAG=$CREATE_PLUGIN_TAG"
+            echo "PUBLISH_RELEASE=$PUBLISH_RELEASE"
+          } >> "$GITHUB_ENV"
+          bash scripts/check-version.sh --release "$RELEASE_TAG"
+
+      - name: Download static assets outside the checkout
         uses: actions/download-artifact@v8
         with:
+          name: editor-static
+          path: ${{ runner.temp }}/editor-static
+
+      - name: Validate and install static assets
+        env:
+          EDITOR_ARTIFACT: ${{ runner.temp }}/editor-static
+        run: python3 scripts/install-editor-assets.py "$EDITOR_ARTIFACT"
+
+      - name: Package the clean plugin and record its checksum
+        run: |
+          make package RELEASE="$RELEASE_TAG"
+          sha256sum "mod_exelearning-${RELEASE_TAG}.zip" > "mod_exelearning-${RELEASE_TAG}.zip.sha256"
+
+      - name: Upload verified package
+        uses: actions/upload-artifact@v7
+        with:
           name: mod_exelearning-${{ env.RELEASE_TAG }}
+          path: |
+            mod_exelearning-${{ env.RELEASE_TAG }}.zip
+            mod_exelearning-${{ env.RELEASE_TAG }}.zip.sha256
+          if-no-files-found: error
 
       - name: Create plugin tag for merged preparation PR
-        if: env.CREATE_PLUGIN_TAG == 'true'
+        if: env.PUBLISH_RELEASE == 'true' && env.CREATE_PLUGIN_TAG == 'true'
         run: |
           TAG="v${RELEASE_TAG}"
           HEAD_SHA=$(git rev-parse HEAD)
@@ -190,6 +214,7 @@ jobs:
           fi
 
       - name: Verify tagged commit
+        if: env.PUBLISH_RELEASE == 'true'
         run: |
           TAG="v${RELEASE_TAG}"
           TAGGED_SHA=$(git rev-parse "refs/tags/$TAG^{commit}")
@@ -201,12 +226,15 @@ jobs:
           bash scripts/check-version.sh --release "$RELEASE_TAG"
 
       - name: Create or update GitHub release
+        if: env.PUBLISH_RELEASE == 'true'
         uses: softprops/action-gh-release@v3
         with:
           tag_name: v${{ env.RELEASE_TAG }}
           name: v${{ env.RELEASE_TAG }}
           generate_release_notes: true
-          files: mod_exelearning-${{ env.RELEASE_TAG }}.zip
+          files: |
+            mod_exelearning-${{ env.RELEASE_TAG }}.zip
+            mod_exelearning-${{ env.RELEASE_TAG }}.zip.sha256
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
