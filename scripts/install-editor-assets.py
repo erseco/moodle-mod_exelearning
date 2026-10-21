@@ -14,10 +14,22 @@ STATIC_SUFFIXES = set('''
 .map .md .mjs .mp3 .mp4 .mts .ogg .otf .pdf .png .po .sdf .svg .swf .ts
 .ttf .txt .wasm .wav .webm .webp .woff .woff2 .xap .xml .xsd .zip .zst
 '''.split())
-# Apache can run PHP/CGI/SSI handlers on an inner extension (shell.php.png); other
-# script types only matter as the final suffix, which the allowlist already rejects,
-# so locale infixes such as messages.pl.json stay valid.
-SERVER_SUFFIX = re.compile(r'\.(?:php\d*|phtml|pht|phar|shtml|cgi)(?:\.|$)', re.I)
+# Apache mod_mime applies AddHandler/AddType mappings to every extension in a name,
+# so shell.php.png or run.py.js can execute where those extensions are mapped.
+SERVER_SUFFIX = re.compile(r'\.(?:php\d*|phtml|pht|phar|shtml|cgi|fcgi|py|rb|sh)(?:\.|$)', re.I)
+# `.pl` is also the Polish locale code (messages.pl.json). A CGI script needs an
+# interpreter line, so a `.pl` infix is rejected only on a file that starts with one.
+PERL_SUFFIX = re.compile(r'\.pl(?:\.|$)', re.I)
+
+
+def is_server_script(path: Path) -> bool:
+    """Return whether a file name could be dispatched to a server-side handler."""
+    if SERVER_SUFFIX.search(path.name):
+        return True
+    if PERL_SUFFIX.search(path.name):
+        with path.open('rb') as handle:
+            return handle.read(2) == b'#!'
+    return False
 
 
 def install(source: Path, destination: Path) -> None:
@@ -31,7 +43,7 @@ def install(source: Path, destination: Path) -> None:
             if name.startswith('.') or not (stat.S_ISDIR(mode) or stat.S_ISREG(mode)):
                 raise ValueError(f'Unsafe editor asset: {path}')
             if stat.S_ISREG(mode) and (
-                SERVER_SUFFIX.search(name)
+                is_server_script(path)
                 or (path.suffix.lower() not in STATIC_SUFFIXES and name not in {'LICENSE', 'mimetype'})
             ):
                 raise ValueError(f'Non-static editor asset: {path}')

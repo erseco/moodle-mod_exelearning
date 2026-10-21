@@ -26,7 +26,9 @@ class EditorAssetsTest(unittest.TestCase):
 
     def test_copies_only_into_static_directory(self):
         (self.source / 'app/payload.bin.zst').write_bytes(b'compressed static data')
+        # Locale infixes are data, including Polish, which shares Perl's `.pl`.
         (self.source / 'app/messages.pl.json').write_text('{}')
+        (self.source / 'app/messages.pl.js').write_text('var messages = {};')
         install(self.source, self.destination)
         self.assertEqual((self.destination / 'app/app.js').read_text(), 'editor()')
         self.assertEqual(self.plugin.read_text(), 'trusted plugin')
@@ -40,6 +42,20 @@ class EditorAssetsTest(unittest.TestCase):
                     install(self.source, self.destination)
                 self.assertFalse(self.destination.exists())
                 self.assertEqual(self.plugin.read_text(), 'trusted plugin')
+                malicious.unlink()
+
+    def test_rejects_script_handler_infixes(self):
+        # Apache mod_mime applies an AddHandler mapping to any extension in the
+        # name, so run.py.js runs as CGI wherever `.py` is mapped to cgi-script.
+        for name, content in (('run.py.js', 'untrusted'), ('run.rb.json', 'untrusted'),
+                              ('run.sh.js', 'untrusted'), ('run.fcgi.js', 'untrusted'),
+                              ('run.pl.js', '#!/usr/bin/perl'), ('RUN.PL.JSON', '#!/usr/bin/perl')):
+            with self.subTest(name=name):
+                malicious = self.source / name
+                malicious.write_text(content)
+                with self.assertRaises(ValueError):
+                    install(self.source, self.destination)
+                self.assertFalse(self.destination.exists())
                 malicious.unlink()
 
     def test_rejects_file_and_directory_symlinks(self):
