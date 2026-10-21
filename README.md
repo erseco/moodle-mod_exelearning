@@ -197,10 +197,13 @@ tag:
 bash scripts/check-editor-http.sh https://your-moodle.example/moodle
 ```
 
-Without a checkout, the same check by hand: both commands must print `403` or
-`404` (a `200` means the bundle is exposed, a `3xx` or `5xx` is not a pass):
+Without a checkout, the same check by hand. The first command must print `200`
+(otherwise the URL or the installation is wrong and the rest proves nothing);
+the other two must print `403` or `404` (a `200` means the bundle is exposed, a
+`3xx` or `5xx` is not a pass):
 
 ```bash
+curl -s -o /dev/null -w '%{http_code}\n' https://your-moodle.example/moodle/mod/exelearning/pix/icon.svg
 curl -s -o /dev/null -w '%{http_code}\n' https://your-moodle.example/moodle/mod/exelearning/dist/static/index.html
 curl -s -o /dev/null -w '%{http_code}\n' https://your-moodle.example/moodle/mod/exelearning/dist/static/app/app.js
 ```
