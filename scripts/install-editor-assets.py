@@ -14,7 +14,10 @@ STATIC_SUFFIXES = set('''
 .map .md .mjs .mp3 .mp4 .mts .ogg .otf .pdf .png .po .sdf .svg .swf .ts
 .ttf .txt .wasm .wav .webm .webp .woff .woff2 .xap .xml .xsd .zip .zst
 '''.split())
-SERVER_SUFFIX = re.compile(r'\.(?:php\d*|phtml|pht|phar|shtml|cgi|pl|py|sh|asp|aspx|jsp)(?:\.|$)', re.I)
+# Apache can run PHP/CGI/SSI handlers on an inner extension (shell.php.png); other
+# script types only matter as the final suffix, which the allowlist already rejects,
+# so locale infixes such as messages.pl.json stay valid.
+SERVER_SUFFIX = re.compile(r'\.(?:php\d*|phtml|pht|phar|shtml|cgi)(?:\.|$)', re.I)
 
 
 def install(source: Path, destination: Path) -> None:

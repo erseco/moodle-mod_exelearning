@@ -26,12 +26,13 @@ class EditorAssetsTest(unittest.TestCase):
 
     def test_copies_only_into_static_directory(self):
         (self.source / 'app/payload.bin.zst').write_bytes(b'compressed static data')
+        (self.source / 'app/messages.pl.json').write_text('{}')
         install(self.source, self.destination)
         self.assertEqual((self.destination / 'app/app.js').read_text(), 'editor()')
         self.assertEqual(self.plugin.read_text(), 'trusted plugin')
 
     def test_rejects_server_code_and_configuration_before_copying(self):
-        for name in ('lib.php', 'LIB.PHP', 'shell.php.png', 'shell.phtml', '.htaccess', '.user.ini', 'run.cgi'):
+        for name in ('lib.php', 'LIB.PHP', 'shell.php.png', 'shell.phtml', '.htaccess', '.user.ini', 'run.cgi', 'run.cgi.js', 'run.py', 'run.sh'):
             with self.subTest(name=name):
                 malicious = self.source / name
                 malicious.write_text('untrusted')

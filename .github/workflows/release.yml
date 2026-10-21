@@ -150,7 +150,9 @@ jobs:
       - name: Read release metadata from the clean checkout
         run: |
           if [ "$GITHUB_EVENT_NAME" = "release" ]; then
-            RELEASE_TAG="${GITHUB_REF_NAME#v}"
+            # Same derivation as the build job, so both pin the same tag.
+            RAW_TAG="${GITHUB_REF##*/}"
+            RELEASE_TAG="${RAW_TAG#v}"
             CREATE_PLUGIN_TAG=false
             PUBLISH_RELEASE=true
           elif [ "$GITHUB_EVENT_NAME" = "push" ]; then
