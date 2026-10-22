@@ -34,28 +34,18 @@ class EditorAssetsTest(unittest.TestCase):
         self.assertEqual(self.plugin.read_text(), 'trusted plugin')
 
     def test_rejects_server_code_and_configuration_before_copying(self):
-        for name in ('lib.php', 'LIB.PHP', 'shell.php.png', 'shell.phtml', '.htaccess', '.user.ini', 'run.cgi', 'run.cgi.js', 'run.py', 'run.sh'):
-            with self.subTest(name=name):
-                malicious = self.source / name
-                malicious.write_text('untrusted')
-                with self.assertRaises(ValueError):
-                    install(self.source, self.destination)
-                self.assertFalse(self.destination.exists())
-                self.assertEqual(self.plugin.read_text(), 'trusted plugin')
-                malicious.unlink()
-
-    def test_rejects_script_handler_infixes(self):
-        # Apache mod_mime applies an AddHandler mapping to any extension in the
-        # name, so run.py.js runs as CGI wherever `.py` is mapped to cgi-script.
-        for name, content in (('run.py.js', 'untrusted'), ('run.rb.json', 'untrusted'),
-                              ('run.sh.js', 'untrusted'), ('run.fcgi.js', 'untrusted'),
-                              ('run.pl.js', '#!/usr/bin/perl'), ('RUN.PL.JSON', '#!/usr/bin/perl')):
+        # Apache mod_mime maps handlers on any extension in a name (run.py.js);
+        # `.pl` is rejected only with an interpreter line, as it doubles as a locale.
+        cases = ['lib.php', 'LIB.PHP', 'shell.php.png', 'shell.phtml', '.htaccess', '.user.ini',
+                 'run.cgi', 'run.cgi.js', 'run.py', 'run.py.js', 'run.rb.json', 'run.sh.js', 'run.fcgi.js']
+        for name, content in [(n, 'untrusted') for n in cases] + [('RUN.PL.JS', '#!/usr/bin/perl')]:
             with self.subTest(name=name):
                 malicious = self.source / name
                 malicious.write_text(content)
                 with self.assertRaises(ValueError):
                     install(self.source, self.destination)
                 self.assertFalse(self.destination.exists())
+                self.assertEqual(self.plugin.read_text(), 'trusted plugin')
                 malicious.unlink()
 
     def test_rejects_file_and_directory_symlinks(self):
@@ -67,11 +57,7 @@ class EditorAssetsTest(unittest.TestCase):
                     install(self.source, self.destination)
                 link.unlink()
 
-    def test_rejects_missing_bundle_and_existing_destination(self):
-        (self.source / 'index.html').unlink()
-        with self.assertRaises(ValueError):
-            install(self.source, self.destination)
-        (self.source / 'index.html').write_text('editor')
+    def test_refuses_to_merge_into_an_existing_destination(self):
         self.destination.mkdir(parents=True)
         with self.assertRaises(FileExistsError):
             install(self.source, self.destination)

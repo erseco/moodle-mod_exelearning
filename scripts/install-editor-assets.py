@@ -50,11 +50,7 @@ def install(source: Path, destination: Path) -> None:
                 or (path.suffix.lower() not in STATIC_SUFFIXES and name not in {'LICENSE', 'mimetype'})
             ):
                 raise ValueError(f'Non-static editor asset: {path}')
-    if not (source / 'index.html').is_file() or not any(
-        (source / name).is_dir() for name in ('app', 'libs', 'files')
-    ):
-        raise ValueError('Editor artifact is missing its entry page or assets')
-    # Never merge untrusted files with an existing tree, or copy anything outside dist/static.
+    # Bundle completeness is checked by scripts/package.sh. Never merge untrusted files with an existing tree, or copy anything outside dist/static.
     shutil.copytree(source, destination)
 
 

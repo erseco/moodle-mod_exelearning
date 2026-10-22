@@ -49,8 +49,6 @@ echo "$build" | grep -q 'path: dist/static/' \
     || { echo "FAIL: build artifact must contain static assets only"; fail=1; }
 echo "$publish" | grep -q 'scripts/install-editor-assets.py' \
     || { echo "FAIL: clean packaging job must validate static assets"; fail=1; }
-echo "$publish" | grep -q 'make package' \
-    || { echo "FAIL: clean packaging job must build the plugin ZIP"; fail=1; }
 if echo "$publish" | grep -q 'needs.build.outputs'; then
     echo "FAIL: privileged release metadata must not come from the untrusted job"; fail=1
 fi

@@ -17,9 +17,9 @@ name: Release
 # build can read a write token from .git/config or the environment, nor plant a
 # git hook or edit a script that a later privileged step would run. `publish`
 # starts on a fresh runner, runs only this repository's own code, validates the
-# downloaded static assets,
-# packages them with a clean checkout, and is the only job allowed to tag, push
-# and publish. Plugin source and release metadata never come from build output.
+# downloaded static assets, packages them with a clean checkout, and is the only
+# job allowed to tag, push and publish. Plugin source and release metadata never
+# come from build output.
 
 on:
   push:
@@ -132,7 +132,6 @@ jobs:
         with:
           name: editor-static
           path: dist/static/
-          include-hidden-files: true
           if-no-files-found: error
 
   publish:
@@ -147,36 +146,21 @@ jobs:
         with:
           fetch-depth: 0
 
+      # Derived again from this checkout (same rules as the build job), never
+      # from build output; `make package` validates it against version.php.
       - name: Read release metadata from the clean checkout
         run: |
-          if [ "$GITHUB_EVENT_NAME" = "release" ]; then
-            # Same derivation as the build job, so both pin the same tag.
-            RAW_TAG="${GITHUB_REF##*/}"
-            RELEASE_TAG="${RAW_TAG#v}"
-            CREATE_PLUGIN_TAG=false
-            PUBLISH_RELEASE=true
-          elif [ "$GITHUB_EVENT_NAME" = "push" ]; then
-            RAW_TAG=$(tr -d '[:space:]' < .editor-version)
-            RELEASE_TAG="${RAW_TAG#v}"
-            CREATE_PLUGIN_TAG=true
-            PUBLISH_RELEASE=true
-          else
-            RELEASE_TAG=dev
-            CREATE_PLUGIN_TAG=false
-            PUBLISH_RELEASE=false
-          fi
+          case "$GITHUB_EVENT_NAME" in
+            release) RAW_TAG="${GITHUB_REF##*/}" ;;
+            push) RAW_TAG=$(tr -d '[:space:]' < .editor-version) ;;
+            *) RAW_TAG=dev ;;
+          esac
+          PUBLISH_RELEASE=true
+          [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ] && PUBLISH_RELEASE=false
           {
-            echo "RELEASE_TAG=$RELEASE_TAG"
-            echo "CREATE_PLUGIN_TAG=$CREATE_PLUGIN_TAG"
+            echo "RELEASE_TAG=${RAW_TAG#v}"
             echo "PUBLISH_RELEASE=$PUBLISH_RELEASE"
           } >> "$GITHUB_ENV"
-          # Same rule as the build job: a manual build validates the committed
-          # state, so it still works on a commit that carries a final release.
-          if [ "$PUBLISH_RELEASE" = "true" ]; then
-            bash scripts/check-version.sh --release "$RELEASE_TAG"
-          else
-            bash scripts/check-version.sh
-          fi
 
       - name: Download static assets outside the checkout
         uses: actions/download-artifact@v8
@@ -189,22 +173,18 @@ jobs:
           EDITOR_ARTIFACT: ${{ runner.temp }}/editor-static
         run: python3 scripts/install-editor-assets.py "$EDITOR_ARTIFACT"
 
-      - name: Package the clean plugin and record its checksum
-        run: |
-          make package RELEASE="$RELEASE_TAG"
-          sha256sum "mod_exelearning-${RELEASE_TAG}.zip" > "mod_exelearning-${RELEASE_TAG}.zip.sha256"
+      - name: Package the clean plugin
+        run: make package RELEASE="$RELEASE_TAG"
 
-      - name: Upload verified package
+      - name: Upload ZIP as workflow artifact
         uses: actions/upload-artifact@v7
         with:
           name: mod_exelearning-${{ env.RELEASE_TAG }}
-          path: |
-            mod_exelearning-${{ env.RELEASE_TAG }}.zip
-            mod_exelearning-${{ env.RELEASE_TAG }}.zip.sha256
+          path: mod_exelearning-${{ env.RELEASE_TAG }}.zip
           if-no-files-found: error
 
       - name: Create plugin tag for merged preparation PR
-        if: env.PUBLISH_RELEASE == 'true' && env.CREATE_PLUGIN_TAG == 'true'
+        if: github.event_name == 'push'
         run: |
           TAG="v${RELEASE_TAG}"
           HEAD_SHA=$(git rev-parse HEAD)
@@ -240,9 +220,7 @@ jobs:
           tag_name: v${{ env.RELEASE_TAG }}
           name: v${{ env.RELEASE_TAG }}
           generate_release_notes: true
-          files: |
-            mod_exelearning-${{ env.RELEASE_TAG }}.zip
-            mod_exelearning-${{ env.RELEASE_TAG }}.zip.sha256
+          files: mod_exelearning-${{ env.RELEASE_TAG }}.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
