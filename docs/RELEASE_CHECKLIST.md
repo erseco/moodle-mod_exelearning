@@ -179,14 +179,9 @@ mariadb10.11):
 
 ## Deployment security gate
 
-- [ ] On every target Apache/nginx deployment with a bundled editor, run
-      `bash scripts/check-editor-http.sh <Moodle URL>` against each public
-      hostname/origin after installation or upgrade and after server changes.
-      Direct `dist/` entry-page and asset requests must return 403/404; redirects,
-      network errors and 5xx responses fail the check. Apache must honour
-      `dist/.htaccess`; nginx must include the equivalent location rule.
-- [ ] Confirm an authorized teacher can still open and save the embedded editor.
-      Never mark the deployment ready from packaging/CI checks alone.
+- [ ] Each deployment passes the direct `dist/` access check in the README
+      ("The embedded editor is a release artifact"), and a teacher can still
+      open and save the embedded editor.
 
 ## 11. Exit criteria — conditions that must hold for a STABLE release
 
