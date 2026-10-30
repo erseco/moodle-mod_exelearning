@@ -9,6 +9,17 @@ name: Release
 # byte-identical to the reviewed release commit. After an automated release is
 # published, the same workflow advances main to the next real Moodle version and
 # switches $plugin->release back to dev; the published tag remains immutable.
+#
+# Two jobs, on purpose. `build` runs third-party code: `make build-editor`
+# fetches exelearning/exelearning at the pinned tag and executes its bun
+# dependency tree and build scripts. That job therefore holds a read-only token
+# and checks out without persisting credentials, so nothing executed during the
+# build can read a write token from .git/config or the environment, nor plant a
+# git hook or edit a script that a later privileged step would run. `publish`
+# starts on a fresh runner, runs only this repository's own code, validates the
+# downloaded static assets, packages them with a clean checkout, and is the only
+# job allowed to tag, push and publish. Plugin source and release metadata never
+# come from build output.
 
 on:
   push:
@@ -38,11 +49,10 @@ on:
           - branch
           - tag
 
-permissions:
-  contents: write
+permissions: {}
 
 jobs:
-  build_and_upload:
+  build:
     # Forks receive the release-preparation commit and the follow-up development
     # commit in a single sync push. GitHub matches the `.editor-version` path
     # filter against every commit in that push but checks out its head, so the
@@ -53,42 +63,67 @@ jobs:
       github.event_name == 'workflow_dispatch' ||
       github.repository == 'exelearning/moodle-mod_exelearning'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+          # The editor build below executes third-party code; it must not find a
+          # GitHub token on disk (actions/checkout persists one by default).
+          persist-credentials: false
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
 
       - name: Set environment variables
+        env:
+          INPUT_EDITOR_REPO_URL: ${{ github.event.inputs.editor_repo_url }}
+          INPUT_EDITOR_REF: ${{ github.event.inputs.editor_ref }}
+          INPUT_EDITOR_REF_TYPE: ${{ github.event.inputs.editor_ref_type }}
         run: |
+          # Tag names may carry shell metacharacters and the packaging recipe pastes
+          # RELEASE into its recipe, so accept plain versions only.
+          valid_tag() { printf '%s' "$1" | grep -Eqx 'v?[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?' || { echo "Unexpected release tag: $1" >&2; exit 1; }; }
           if [ "${{ github.event_name }}" = "release" ]; then
             RAW_TAG="${GITHUB_REF##*/}"
+            valid_tag "$RAW_TAG"
             VERSION_TAG="${RAW_TAG#v}"
-            echo "PUBLISH_RELEASE=true" >> "$GITHUB_ENV"
-            echo "CREATE_PLUGIN_TAG=false" >> "$GITHUB_ENV"
-            echo "RELEASE_TAG=${VERSION_TAG}" >> "$GITHUB_ENV"
-            echo "EXELEARNING_EDITOR_REPO_URL=https://github.com/exelearning/exelearning.git" >> "$GITHUB_ENV"
-            echo "EXELEARNING_EDITOR_REF=v${VERSION_TAG}" >> "$GITHUB_ENV"
-            echo "EXELEARNING_EDITOR_REF_TYPE=tag" >> "$GITHUB_ENV"
+            PUBLISH_RELEASE=true
+            RELEASE_TAG="${VERSION_TAG}"
+            {
+              echo "EXELEARNING_EDITOR_REPO_URL=https://github.com/exelearning/exelearning.git"
+              echo "EXELEARNING_EDITOR_REF=v${VERSION_TAG}"
+              echo "EXELEARNING_EDITOR_REF_TYPE=tag"
+            } >> "$GITHUB_ENV"
           elif [ "${{ github.event_name }}" = "push" ]; then
             RAW_TAG=$(tr -d '[:space:]' < .editor-version)
+            valid_tag "$RAW_TAG"
             VERSION_TAG="${RAW_TAG#v}"
-            echo "PUBLISH_RELEASE=true" >> "$GITHUB_ENV"
-            echo "CREATE_PLUGIN_TAG=true" >> "$GITHUB_ENV"
-            echo "RELEASE_TAG=${VERSION_TAG}" >> "$GITHUB_ENV"
-            echo "EXELEARNING_EDITOR_REPO_URL=https://github.com/exelearning/exelearning.git" >> "$GITHUB_ENV"
-            echo "EXELEARNING_EDITOR_REF=v${VERSION_TAG}" >> "$GITHUB_ENV"
-            echo "EXELEARNING_EDITOR_REF_TYPE=tag" >> "$GITHUB_ENV"
+            PUBLISH_RELEASE=true
+            RELEASE_TAG="${VERSION_TAG}"
+            {
+              echo "EXELEARNING_EDITOR_REPO_URL=https://github.com/exelearning/exelearning.git"
+              echo "EXELEARNING_EDITOR_REF=v${VERSION_TAG}"
+              echo "EXELEARNING_EDITOR_REF_TYPE=tag"
+            } >> "$GITHUB_ENV"
           else
-            echo "PUBLISH_RELEASE=false" >> "$GITHUB_ENV"
-            echo "CREATE_PLUGIN_TAG=false" >> "$GITHUB_ENV"
-            echo "RELEASE_TAG=dev" >> "$GITHUB_ENV"
-            echo "EXELEARNING_EDITOR_REPO_URL=${{ github.event.inputs.editor_repo_url }}" >> "$GITHUB_ENV"
-            echo "EXELEARNING_EDITOR_REF=${{ github.event.inputs.editor_ref }}" >> "$GITHUB_ENV"
-            echo "EXELEARNING_EDITOR_REF_TYPE=${{ github.event.inputs.editor_ref_type }}" >> "$GITHUB_ENV"
+            # A newline in an input would add arbitrary variables to $GITHUB_ENV.
+            case "$INPUT_EDITOR_REPO_URL$INPUT_EDITOR_REF$INPUT_EDITOR_REF_TYPE" in
+              *$'\n'*|*$'\r'*) echo "Dispatch inputs must be single-line" >&2; exit 1 ;;
+            esac
+            PUBLISH_RELEASE=false
+            RELEASE_TAG=dev
+            {
+              echo "EXELEARNING_EDITOR_REPO_URL=${INPUT_EDITOR_REPO_URL}"
+              echo "EXELEARNING_EDITOR_REF=${INPUT_EDITOR_REF}"
+              echo "EXELEARNING_EDITOR_REF_TYPE=${INPUT_EDITOR_REF_TYPE}"
+            } >> "$GITHUB_ENV"
           fi
+          {
+            echo "PUBLISH_RELEASE=${PUBLISH_RELEASE}"
+            echo "RELEASE_TAG=${RELEASE_TAG}"
+          } >> "$GITHUB_ENV"
 
       - name: Validate release metadata
         run: |
@@ -98,8 +133,70 @@ jobs:
             bash scripts/check-version.sh
           fi
 
+      - name: Build static editor
+        run: make build-editor
+
+      - name: Upload static editor assets only
+        uses: actions/upload-artifact@v7
+        with:
+          name: editor-static
+          path: dist/static/
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      # This job runs only this repository's own scripts, so the token
+      # actions/checkout persists is what the tag and main pushes below use.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      # Derived again from this checkout (same rules as the build job), never
+      # from build output; `make package` validates it against version.php.
+      - name: Read release metadata from the clean checkout
+        run: |
+          case "$GITHUB_EVENT_NAME" in
+            release) RAW_TAG="${GITHUB_REF##*/}" ;;
+            push) RAW_TAG=$(tr -d '[:space:]' < .editor-version) ;;
+            *) RAW_TAG=dev ;;
+          esac
+          printf '%s' "$RAW_TAG" | grep -Eqx 'v?[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?|dev' \
+            || { echo "Unexpected release tag: $RAW_TAG" >&2; exit 1; }
+          PUBLISH_RELEASE=true
+          [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ] && PUBLISH_RELEASE=false
+          {
+            echo "RELEASE_TAG=${RAW_TAG#v}"
+            echo "PUBLISH_RELEASE=$PUBLISH_RELEASE"
+          } >> "$GITHUB_ENV"
+
+      - name: Download static assets outside the checkout
+        uses: actions/download-artifact@v8
+        with:
+          name: editor-static
+          path: ${{ runner.temp }}/editor-static
+
+      - name: Validate and install static assets
+        env:
+          EDITOR_ARTIFACT: ${{ runner.temp }}/editor-static
+        run: python3 scripts/install-editor-assets.py "$EDITOR_ARTIFACT"
+
+      - name: Package the clean plugin
+        run: make package RELEASE="$RELEASE_TAG"
+
+      - name: Upload ZIP as workflow artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: mod_exelearning-${{ env.RELEASE_TAG }}
+          path: mod_exelearning-${{ env.RELEASE_TAG }}.zip
+          if-no-files-found: error
+
       - name: Create plugin tag for merged preparation PR
-        if: env.CREATE_PLUGIN_TAG == 'true'
+        if: github.event_name == 'push'
         run: |
           TAG="v${RELEASE_TAG}"
           HEAD_SHA=$(git rev-parse HEAD)
@@ -128,18 +225,6 @@ jobs:
           fi
           bash scripts/check-version.sh --release "$RELEASE_TAG"
 
-      - name: Build static editor
-        run: make build-editor
-
-      - name: Create package
-        run: make package RELEASE=${RELEASE_TAG}
-
-      - name: Upload ZIP as workflow artifact
-        uses: actions/upload-artifact@v7
-        with:
-          name: mod_exelearning-${{ env.RELEASE_TAG }}
-          path: mod_exelearning-${{ env.RELEASE_TAG }}.zip
-
       - name: Create or update GitHub release
         if: env.PUBLISH_RELEASE == 'true'
         uses: softprops/action-gh-release@v3
@@ -152,7 +237,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Return main to development
-        if: github.event_name == 'push' && env.PUBLISH_RELEASE == 'true'
+        if: github.event_name == 'push'
         run: |
           set -euo pipefail
 
