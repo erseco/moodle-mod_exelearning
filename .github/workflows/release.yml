@@ -82,8 +82,12 @@ jobs:
           INPUT_EDITOR_REF: ${{ github.event.inputs.editor_ref }}
           INPUT_EDITOR_REF_TYPE: ${{ github.event.inputs.editor_ref_type }}
         run: |
+          # Tag names may carry shell metacharacters and the packaging recipe pastes
+          # RELEASE into its recipe, so accept plain versions only.
+          valid_tag() { printf '%s' "$1" | grep -Eqx 'v?[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?' || { echo "Unexpected release tag: $1" >&2; exit 1; }; }
           if [ "${{ github.event_name }}" = "release" ]; then
             RAW_TAG="${GITHUB_REF##*/}"
+            valid_tag "$RAW_TAG"
             VERSION_TAG="${RAW_TAG#v}"
             PUBLISH_RELEASE=true
             RELEASE_TAG="${VERSION_TAG}"
@@ -94,6 +98,7 @@ jobs:
             } >> "$GITHUB_ENV"
           elif [ "${{ github.event_name }}" = "push" ]; then
             RAW_TAG=$(tr -d '[:space:]' < .editor-version)
+            valid_tag "$RAW_TAG"
             VERSION_TAG="${RAW_TAG#v}"
             PUBLISH_RELEASE=true
             RELEASE_TAG="${VERSION_TAG}"
@@ -103,6 +108,10 @@ jobs:
               echo "EXELEARNING_EDITOR_REF_TYPE=tag"
             } >> "$GITHUB_ENV"
           else
+            # A newline in an input would add arbitrary variables to $GITHUB_ENV.
+            case "$INPUT_EDITOR_REPO_URL$INPUT_EDITOR_REF$INPUT_EDITOR_REF_TYPE" in
+              *$'\n'*|*$'\r'*) echo "Dispatch inputs must be single-line" >&2; exit 1 ;;
+            esac
             PUBLISH_RELEASE=false
             RELEASE_TAG=dev
             {
@@ -133,6 +142,7 @@ jobs:
           name: editor-static
           path: dist/static/
           if-no-files-found: error
+          retention-days: 1
 
   publish:
     needs: build
@@ -155,6 +165,8 @@ jobs:
             push) RAW_TAG=$(tr -d '[:space:]' < .editor-version) ;;
             *) RAW_TAG=dev ;;
           esac
+          printf '%s' "$RAW_TAG" | grep -Eqx 'v?[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?|dev' \
+            || { echo "Unexpected release tag: $RAW_TAG" >&2; exit 1; }
           PUBLISH_RELEASE=true
           [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ] && PUBLISH_RELEASE=false
           {
